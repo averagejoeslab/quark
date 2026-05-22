@@ -15,6 +15,7 @@ while True:
     results = []
     for c in calls:
         print(f"$ {c.input['cmd']}")
-        out = subprocess.run(c.input["cmd"], shell=True, capture_output=True, text=True).stdout
-        results.append({"type": "tool_result", "tool_use_id": c.id, "content": out or "(no output)"})
+        p = subprocess.run(c.input["cmd"], shell=True, capture_output=True, text=True)
+        out = (p.stdout + p.stderr).strip() or f"(exit {p.returncode})"
+        results.append({"type": "tool_result", "tool_use_id": c.id, "content": out})
     messages.append({"role": "user", "content": results})
