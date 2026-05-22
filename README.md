@@ -4,11 +4,21 @@ The smallest possible coding agent. 26 lines. One bash tool. One loop. Auto-comp
 
 ## Use
 
+Install [uv](https://docs.astral.sh/uv/) (one-time, if you don't have it):
+
 ```sh
-pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...   # or: source .env
-python quark.py "list the files and tell me what this project is"   # one-shot
-python quark.py                                                     # chat (Ctrl+C to exit)
+curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
+# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Set up and run:
+
+```sh
+uv venv
+uv pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...                                      # or: source .env
+uv run quark.py "list the files and tell me what this project is"        # one-shot
+uv run quark.py                                                          # chat (Ctrl+C to exit)
 ```
 
 ## How it works
