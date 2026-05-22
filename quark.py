@@ -10,7 +10,7 @@ messages = [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
     if sum(len(str(m["content"])) for m in messages) > CTX * 3 // 4:
-        s = client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "Write a handoff so a fresh assistant can continue this work without missing a beat. Include: the original task, what you've done (with specifics — file names, commands, findings), current state, and the exact next step you were about to take."}]).content[0].text
+        s = client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "You are quark. Your context is full and you need to compact it now. Write a handoff summary for yourself so you don't forget what you've done and what you're doing right now. Include: the original task, what you've accomplished so far (with specifics — file names, commands, findings), current state, and the exact next step you need to take when you resume."}]).content[0].text
         messages = [{"role": "user", "content": f"[resuming] {s}"}]
     r = client.messages.create(model=MODEL, max_tokens=4096, system=system, tools=tools, messages=messages)
     messages.append({"role": "assistant", "content": r.content})
