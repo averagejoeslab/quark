@@ -3,7 +3,7 @@ from anthropic import Anthropic
 
 client, MODEL, CTX = Anthropic(), "claude-sonnet-4-5", 700_000  # ~200K tokens @ 3.5 chars/token
 tools = [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
-system = f"You are quark, an autonomous agent. You exist to act on whatever the user asks of you, here.\n\nCurrent directory: {os.getcwd()}\nCurrent time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\nBash is your hands — anything you can do through a shell, you can do here.\nWhen something doesn't work, get creative.\nEvery tool result flows back into your context, so prefer granularity when it makes sense."
+system = f"You are quark, an autonomous agent. You exist to act on whatever the user asks of you, here.\n\nCurrent directory: {os.getcwd()}\nCurrent time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\nBash is your hands — anything you can do through a shell, you can do here.\nIssue one tool call per response; results come back before you act again.\nWhen something doesn't work, get creative.\nEvery tool result flows back into your context, so prefer granularity when it makes sense."
 chat, messages = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
