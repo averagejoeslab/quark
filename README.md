@@ -1,6 +1,6 @@
 # quark
 
-The smallest possible coding agent. 37 lines. One bash tool. One loop. Auto-compacts when the context window fills up. Persistent memory across sessions.
+The smallest possible coding agent. 22 lines. One bash tool. One loop. Auto-compacts when the context window fills up. Persistent memory across sessions.
 
 ## Use
 
@@ -58,34 +58,33 @@ grep "2026-05-22" .quark/memory/memory.md     # today's learnings
 
 ## Execution flow
 
-### Startup (L1–7)
+### Startup (L1–6)
 1. Load stdlib + `Anthropic` client.
-2. Instantiate `client`, set `MODEL`, set `CTX = 700_000` (~200K tokens at ~3.5 chars/token).
-3. Define the single `bash` tool schema.
-4. Build the `system` prompt — captures `os.getcwd()` and `datetime.now()` **once** at startup; these are snapshots and do not refresh during the run. Includes memory system documentation.
-5. Tuple-assign `chat` (True iff no CLI args) and `messages` (one user message — joined argv, or `input("> ")` if none).
-6. Enter `while True:`.
+2. Tuple-assign `client`, `MODEL`, `CTX = 700_000` (~200K tokens at ~3.5 chars/token), and `tools` (single `bash` schema) on one line.
+3. Build the `system` prompt — captures `os.getcwd()` and `datetime.now()` **once** at startup; these are snapshots and do not refresh during the run. Includes memory system documentation.
+4. Tuple-assign `chat` (True iff no CLI args) and `messages` (one user message — joined argv, or `input("> ")` if none).
+5. Enter `while True:`.
 
 ### Each loop iteration
 Every pass runs two phases: a size check, then the API call and response handling.
 
-**Phase 1 — size check (L10–12):**
+**Phase 1 — size check (L9–11):**
 - Sum `len(str(m["content"]))` across all messages.
 - If total ≤ 75% of `CTX`: fall through.
 - If total > 75% of `CTX`: **compact**.
-  - One API call (L11): sends current `messages` + a final user message *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* Same `system`, no `tools`, max 2048 output tokens. Reads `.content[0].text` into `s`.
-  - L12: `messages` is **rebound** to `[{"role": "user", "content": f"[resuming] {s}"}]`. All prior history is unreachable.
+  - One API call (L10): sends current `messages` + a final user message *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* Same `system`, no `tools`, max 2048 output tokens. Reads `.content[0].text` into `s`.
+  - L11: `messages` is **rebound** to `[{"role": "user", "content": f"[resuming] {s}"}]`. All prior history is unreachable.
   - No `continue` — falls through to phase 2 in the same iteration. A compaction turn makes **two** API calls.
 
-**Phase 2 — main turn (L13–23):**
-- L13: API call with full `system` + `tools` + `messages`.
-- L14: append assistant response (`r.content`, a list of blocks) to `messages`.
-- L15: short-circuit `for b in r.content: b.type == "text" and b.text and print(b.text)` — prints non-empty text blocks, silently skips everything else.
-- L16: collect `tool_use` blocks into `calls`.
-- L17 branch:
-  - **No calls + one-shot** (`chat == False`): L18 → `break`, program exits.
-  - **No calls + chat**: L19 prompts `\n> `, walrus binds the input to `u`. If `u == "/q"`: print "Goodbye!" + `break`. Otherwise L20 appends `u` as a user message + `continue`.
-  - **Has calls**: L21–22 build `results` — each iteration prints `$ <cmd>`, runs `subprocess.getoutput` (combined stdout+stderr, never raises), substitutes `(no output)` for empty, wraps in a `tool_result` block. L23 appends one user message with the full `results` list.
+**Phase 2 — main turn (L12–22):**
+- L12: API call with full `system` + `tools` + `messages`.
+- L13: append assistant response (`r.content`, a list of blocks) to `messages`.
+- L14: short-circuit `for b in r.content: b.type == "text" and b.text and print(b.text)` — prints non-empty text blocks, silently skips everything else.
+- L15: collect `tool_use` blocks into `calls`.
+- L16 branch:
+  - **No calls + one-shot** (`chat == False`): L17 → `break`, program exits.
+  - **No calls + chat**: L18 prompts `\n> `, walrus binds the input to `u`. If `u == "/q"`: `break`. Otherwise L19 appends `u` as a user message + `continue`.
+  - **Has calls**: L20–21 build `results` — each iteration prints `$ <cmd>`, runs `subprocess.getoutput` (combined stdout+stderr, never raises), substitutes `(no output)` for empty, wraps in a `tool_result` block. L22 appends one user message with the full `results` list.
 
 ### Per-turn growth
 - Tool-call turn: +2 messages (assistant + user-tool_results).
@@ -99,8 +98,8 @@ Every pass runs two phases: a size check, then the API call and response handlin
 4. Repeats indefinitely until the loop exits.
 
 ### Loop exits
-- **One-shot** (`python quark.py "task"`): exits as soon as Claude returns a response with no tool calls (L18 break).
-- **`/q`** (chat mode only): user types `/q` at the `\n> ` prompt → "Goodbye!" + break (L19).
+- **One-shot** (`python quark.py "task"`): exits as soon as Claude returns a response with no tool calls (L17 break).
+- **`/q`** (chat mode only): user types `/q` at the `\n> ` prompt → silent break (L18).
 - **Ctrl+C** or process kill: hard exit at any point.
 
 ### Restart
