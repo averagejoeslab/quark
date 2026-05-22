@@ -10,8 +10,12 @@ while True:
     try:
         r = client.messages.create(model=MODEL, max_tokens=4096, tools=tools, messages=messages)
     except BadRequestError:
-        s = client.messages.create(model=MODEL, max_tokens=2048, messages=messages + [{"role": "user", "content": "Summarize what we've done and where we are."}]).content[0].text
-        messages = [{"role": "user", "content": f"[compacted] {s}"}]
+        cut = len(messages) * 4 // 5
+        while cut < len(messages) and not (messages[cut]["role"] == "user" and isinstance(messages[cut]["content"], str)):
+            cut += 1
+        old, messages = messages[:cut], messages[cut:]
+        s = client.messages.create(model=MODEL, max_tokens=2048, messages=old + [{"role": "user", "content": "Summarize what we've done."}]).content[0].text
+        messages = [{"role": "user", "content": f"[compacted] {s}"}] + messages
         continue
     messages.append({"role": "assistant", "content": r.content})
     for b in r.content:
