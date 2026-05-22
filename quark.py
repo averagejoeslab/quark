@@ -1,16 +1,14 @@
 import subprocess, sys
-from anthropic import Anthropic, BadRequestError
+from anthropic import Anthropic
 
-client, MODEL = Anthropic(), "claude-sonnet-4-5"
+client, MODEL, CTX = Anthropic(), "claude-sonnet-4-5", 700_000  # ~200K tokens @ 3.5 chars/token
 tools = [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
 chat = len(sys.argv) < 2
 messages = [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
-    try:
-        r = client.messages.create(model=MODEL, max_tokens=4096, tools=tools, messages=messages)
-    except BadRequestError:
-        sizes = [len(str(m["content"])) for m in messages]
+    sizes = [len(str(m["content"])) for m in messages]
+    if sum(sizes) > CTX * 3 // 4:
         target, cut, run = sum(sizes) * 4 // 5, 0, 0
         while cut < len(messages) and run < target:
             run += sizes[cut]; cut += 1
@@ -19,7 +17,7 @@ while True:
         old, messages = messages[:cut], messages[cut:]
         s = client.messages.create(model=MODEL, max_tokens=2048, messages=old + [{"role": "user", "content": "Summarize what we've done."}]).content[0].text
         messages = [{"role": "user", "content": f"[compacted] {s}"}] + messages
-        continue
+    r = client.messages.create(model=MODEL, max_tokens=4096, tools=tools, messages=messages)
     messages.append({"role": "assistant", "content": r.content})
     for b in r.content:
         if b.type == "text" and b.text: print(b.text)
