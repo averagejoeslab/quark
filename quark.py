@@ -3,6 +3,7 @@ from anthropic import Anthropic
 
 client = Anthropic()
 tools = [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
+chat = len(sys.argv) < 2
 messages = [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
@@ -11,7 +12,9 @@ while True:
     for b in r.content:
         if b.type == "text" and b.text: print(b.text)
     calls = [b for b in r.content if b.type == "tool_use"]
-    if not calls: break
+    if not calls:
+        if not chat: break
+        messages.append({"role": "user", "content": input("\n> ")}); continue
     results = []
     for c in calls:
         print(f"$ {c.input['cmd']}")
