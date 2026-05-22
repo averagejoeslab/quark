@@ -7,16 +7,9 @@ chat = len(sys.argv) < 2
 messages = [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
-    sizes = [len(str(m["content"])) for m in messages]
-    if sum(sizes) > CTX * 3 // 4:
-        target, cut, run = sum(sizes) * 4 // 5, 0, 0
-        while cut < len(messages) and run < target:
-            run += sizes[cut]; cut += 1
-        while cut < len(messages) and not (messages[cut]["role"] == "user" and isinstance(messages[cut]["content"], str)):
-            cut += 1
-        old, messages = messages[:cut], messages[cut:]
-        s = client.messages.create(model=MODEL, max_tokens=2048, messages=old + [{"role": "user", "content": "Summarize what we've done."}]).content[0].text
-        messages = [{"role": "user", "content": f"[compacted] {s}"}] + messages
+    if sum(len(str(m["content"])) for m in messages) > CTX * 3 // 4:
+        s = client.messages.create(model=MODEL, max_tokens=2048, messages=messages + [{"role": "user", "content": "Write a handoff so a fresh assistant can continue this work without missing a beat. Include: the original task, what you've done (with specifics — file names, commands, findings), current state, and the exact next step you were about to take."}]).content[0].text
+        messages = [{"role": "user", "content": f"[resuming] {s}"}]
     r = client.messages.create(model=MODEL, max_tokens=4096, tools=tools, messages=messages)
     messages.append({"role": "assistant", "content": r.content})
     for b in r.content:
