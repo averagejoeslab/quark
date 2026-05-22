@@ -1,6 +1,6 @@
 # quark
 
-The smallest possible coding agent. 24 lines. One bash tool. One loop. Auto-compacts when the context window fills up.
+The smallest possible coding agent. 37 lines. One bash tool. One loop. Auto-compacts when the context window fills up. Persistent memory across sessions.
 
 ## Use
 
@@ -27,13 +27,42 @@ Claude calls `bash`, you feed stdout+stderr back as a string, repeat until Claud
 
 When the conversation grows past 75% of the model's context window (measured by character length, using Anthropic's ~3.5 chars/token heuristic), quark asks Claude to compact its own working memory into a gist, then replaces the entire message history with that single `[resuming]` note. The next turn picks up from the gist.
 
+## Memory System
+
+Quark has persistent semantic memory in `.quark/memory/memory.md` (append-only). 
+
+**Two types of memory:**
+- **Working memory (the gist)**: Ephemeral compression at 75% capacity to continue current work
+- **Semantic memory (memory.md)**: Permanent knowledge accumulated across all sessions
+
+**Memory format:**
+```markdown
+## YYYY-MM-DD HH:MM:SS
+- Bullet point of knowledge
+- Another learning
+```
+
+**How it works:**
+- Memories are NOT auto-loaded on startup (saves context)
+- Quark retrieves on-demand using bash: `cat`, `tail`, `grep` 
+- Session birth datetime enables temporal reasoning about memory recency
+- Quark writes memories when: learning something valuable, post-compaction, session end, or by judgment
+- Single append-only file - simple, searchable, grows forever
+
+Example memory operations:
+```bash
+tail -50 .quark/memory/memory.md              # recent memories
+grep "python" .quark/memory/memory.md         # topic search
+grep "2026-05-22" .quark/memory/memory.md     # today's learnings
+```
+
 ## Execution flow
 
 ### Startup (L1–7)
 1. Load stdlib + `Anthropic` client.
 2. Instantiate `client`, set `MODEL`, set `CTX = 700_000` (~200K tokens at ~3.5 chars/token).
 3. Define the single `bash` tool schema.
-4. Build the `system` prompt — captures `os.getcwd()` and `datetime.now()` **once** at startup; these are snapshots and do not refresh during the run.
+4. Build the `system` prompt — captures `os.getcwd()` and `datetime.now()` **once** at startup; these are snapshots and do not refresh during the run. Includes memory system documentation.
 5. Tuple-assign `chat` (True iff no CLI args) and `messages` (one user message — joined argv, or `input("> ")` if none).
 6. Enter `while True:`.
 
@@ -75,4 +104,4 @@ Every pass runs two phases: a size check, then the API call and response handlin
 - **Ctrl+C** or process kill: hard exit at any point.
 
 ### Restart
-A fresh `python quark.py ...` invocation is a clean slate. The Python process restarts from scratch: new client, new `system` prompt with fresh `cwd` and fresh `now()`, empty `messages` ready for a new initial user input. Quark stores nothing on disk — any prior conversation, including the most recent `[resuming]` gist, is gone.
+A fresh `python quark.py ...` invocation is a clean slate. The Python process restarts from scratch: new client, new `system` prompt with fresh `cwd` and fresh `now()`, empty `messages` ready for a new initial user input. The gist from any prior conversation is gone, but **semantic memory persists** in `.quark/memory/memory.md` and can be retrieved on-demand.
