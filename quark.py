@@ -21,10 +21,6 @@ while True:
         if not chat: break
         user_input = input("\n> ")
         if user_input == "/q":
-            print("Committing and pushing changes...")
-            subprocess.run(["git", "add", "-A"], check=False)
-            subprocess.run(["git", "commit", "-m", "committed by quark"], check=False)
-            subprocess.run(["git", "push"], check=False)
             print("Goodbye!")
             break
         messages.append({"role": "user", "content": user_input}); continue

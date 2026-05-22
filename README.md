@@ -18,7 +18,7 @@ uv venv
 uv pip install anthropic
 export ANTHROPIC_API_KEY=sk-ant-...                                      # or: source .env
 uv run quark.py "list the files and tell me what this project is"        # one-shot
-uv run quark.py                                                          # chat (Ctrl+C to exit, or /q to commit & push)
+uv run quark.py                                                          # chat (Ctrl+C or /q to exit)
 ```
 
 ## How it works
@@ -26,8 +26,6 @@ uv run quark.py                                                          # chat 
 Claude calls `bash`, you feed stdout+stderr back as a string, repeat until Claude stops calling tools. Failures aren't handled — the model reads the error and decides what to do next.
 
 When the conversation grows past 75% of the model's context window (measured by character length, using Anthropic's ~3.5 chars/token heuristic), quark replaces the entire message history with a single `[resuming]` handoff. The summary prompt asks Claude to write a recap that captures the original task, what's been done, current state, and the exact next step — so the next turn picks up without missing a beat.
-
-In chat mode, type `/q` to gracefully exit — quark will automatically commit all changes with message "committed by quark" and push to the remote git repo.
 
 ## Execution flow
 
@@ -53,8 +51,7 @@ Two phases run on every pass: a pre-call size check, then the API call and respo
 - Append the assistant response to `messages`.
 - Print every text block in the response.
 - Collect any `tool_use` blocks into `calls`.
-- **If no tool calls:** one-shot mode exits; chat mode prompts the user for the next message, appends it, and continues.
-  - **Special command `/q`:** In chat mode, exits gracefully by running `git add -A`, `git commit -m "committed by quark"`, `git push`, then breaks the loop.
+- **If no tool calls:** one-shot mode exits; chat mode prompts the user for the next message, appends it, and continues. Type `/q` to exit gracefully.
 - **If tool calls:** for each, print `$ <cmd>`, run `subprocess.getoutput`, collect the result. Append all results as one user message with a list of `tool_result` blocks. Loop back to phase 1.
 
 ### Long-haul trajectory
