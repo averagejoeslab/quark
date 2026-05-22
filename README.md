@@ -1,6 +1,6 @@
 # quark
 
-The smallest possible coding agent. 26 lines. One bash tool. One loop. Auto-compacts when the context window fills up.
+The smallest possible coding agent. 24 lines. One bash tool. One loop. Auto-compacts when the context window fills up.
 
 ## Use
 
@@ -25,38 +25,54 @@ uv run quark.py                                                          # chat 
 
 Claude calls `bash`, you feed stdout+stderr back as a string, repeat until Claude stops calling tools. Failures aren't handled — the model reads the error and decides what to do next.
 
-When the conversation grows past 75% of the model's context window (measured by character length, using Anthropic's ~3.5 chars/token heuristic), quark replaces the entire message history with a single `[resuming]` handoff. The summary prompt asks Claude to write a recap that captures the original task, what's been done, current state, and the exact next step — so the next turn picks up without missing a beat.
+When the conversation grows past 75% of the model's context window (measured by character length, using Anthropic's ~3.5 chars/token heuristic), quark asks Claude to compact its own working memory into a gist, then replaces the entire message history with that single `[resuming]` note. The next turn picks up from the gist.
 
 ## Execution flow
 
-### Startup
-1. Instantiate the Anthropic client, set `MODEL` and `CTX` (700,000 chars ≈ 200K tokens).
-2. Define the single `bash` tool.
-3. `chat` mode is `True` when no CLI args are given, `False` otherwise.
-4. `messages` starts as one user message — either the joined CLI args, or whatever the user types at the `>` prompt.
+### Startup (L1–7)
+1. Load stdlib + `Anthropic` client.
+2. Instantiate `client`, set `MODEL`, set `CTX = 700_000` (~200K tokens at ~3.5 chars/token).
+3. Define the single `bash` tool schema.
+4. Build the `system` prompt — captures `os.getcwd()` and `datetime.now()` **once** at startup; these are snapshots and do not refresh during the run.
+5. Tuple-assign `chat` (True iff no CLI args) and `messages` (one user message — joined argv, or `input("> ")` if none).
+6. Enter `while True:`.
 
 ### Each loop iteration
-Two phases run on every pass: a pre-call size check, then the API call and response handling.
+Every pass runs two phases: a size check, then the API call and response handling.
 
-**Phase 1 — size check (lines 10–12):**
-- Sum the character length of every message's content.
-- If total ≤ 75% of `CTX`: fall through to phase 2.
+**Phase 1 — size check (L10–12):**
+- Sum `len(str(m["content"]))` across all messages.
+- If total ≤ 75% of `CTX`: fall through.
 - If total > 75% of `CTX`: **compact**.
-  - Make a single API call with the full history plus one user prompt: *"Write a handoff so a fresh assistant can continue this work without missing a beat..."* (no tools, max 2048 tokens).
-  - Replace `messages` entirely with one user message: `[resuming] <summary>`. All prior history is discarded.
-  - Fall through to phase 2 in the same iteration. So a compaction turn makes **two** API calls (summary + main).
+  - One API call (L11): sends current `messages` + a final user message *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* Same `system`, no `tools`, max 2048 output tokens. Reads `.content[0].text` into `s`.
+  - L12: `messages` is **rebound** to `[{"role": "user", "content": f"[resuming] {s}"}]`. All prior history is unreachable.
+  - No `continue` — falls through to phase 2 in the same iteration. A compaction turn makes **two** API calls.
 
-**Phase 2 — main turn (lines 13–25):**
-- Send `messages` + tools to Claude.
-- Append the assistant response to `messages`.
-- Print every text block in the response.
-- Collect any `tool_use` blocks into `calls`.
-- **If no tool calls:** one-shot mode exits; chat mode prompts the user for the next message, appends it, and continues. Type `/q` to exit gracefully.
-- **If tool calls:** for each, print `$ <cmd>`, run `subprocess.getoutput`, collect the result. Append all results as one user message with a list of `tool_result` blocks. Loop back to phase 1.
+**Phase 2 — main turn (L13–23):**
+- L13: API call with full `system` + `tools` + `messages`.
+- L14: append assistant response (`r.content`, a list of blocks) to `messages`.
+- L15: short-circuit `for b in r.content: b.type == "text" and b.text and print(b.text)` — prints non-empty text blocks, silently skips everything else.
+- L16: collect `tool_use` blocks into `calls`.
+- L17 branch:
+  - **No calls + one-shot** (`chat == False`): L18 → `break`, program exits.
+  - **No calls + chat**: L19 prompts `\n> `, walrus binds the input to `u`. If `u == "/q"`: print "Goodbye!" + `break`. Otherwise L20 appends `u` as a user message + `continue`.
+  - **Has calls**: L21–22 build `results` — each iteration prints `$ <cmd>`, runs `subprocess.getoutput` (combined stdout+stderr, never raises), substitutes `(no output)` for empty, wraps in a `tool_result` block. L23 appends one user message with the full `results` list.
+
+### Per-turn growth
+- Tool-call turn: +2 messages (assistant + user-tool_results).
+- Chat-text turn: +2 messages (assistant + user-text).
+- Compaction turn: history collapses to **1** message, then phase 2 appends — ending at ~2–3.
 
 ### Long-haul trajectory
-1. **Turns 1..N**: `messages` grows by 2 per turn (assistant + user/tool_results). Size check stays under threshold and falls through.
-2. **Turn N+1 trips the threshold**: full history gets summarized into one `[resuming]` message; original turns are dropped.
-3. **Same iteration continues**: main API call now sees only the `[resuming]` message + tools. Claude reads the handoff and continues — typically issuing the "exact next step" from the summary as its next tool call.
-4. **Turns N+2..M**: normal growth resumes. Compaction won't re-trigger until total chars cross 75% of `CTX` again.
-5. Repeats indefinitely.
+1. **Cycles 1..N**: `messages` grows by 2 per turn. Phase 1 check stays under threshold.
+2. **Cycle N+1**: total chars cross 525,000. Phase 1 fires the summary call, history collapses to a single `[resuming]` message, phase 2 continues in the same iteration. Claude reads the gist and acts.
+3. **Cycles N+2..M**: normal growth resumes from the new baseline.
+4. Repeats indefinitely until the loop exits.
+
+### Loop exits
+- **One-shot** (`python quark.py "task"`): exits as soon as Claude returns a response with no tool calls (L18 break).
+- **`/q`** (chat mode only): user types `/q` at the `\n> ` prompt → "Goodbye!" + break (L19).
+- **Ctrl+C** or process kill: hard exit at any point.
+
+### Restart
+A fresh `python quark.py ...` invocation is a clean slate. The Python process restarts from scratch: new client, new `system` prompt with fresh `cwd` and fresh `now()`, empty `messages` ready for a new initial user input. Quark stores nothing on disk — any prior conversation, including the most recent `[resuming]` gist, is gone.
