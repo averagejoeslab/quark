@@ -4,7 +4,7 @@ from anthropic import Anthropic
 
 client, MODEL, CTX = Anthropic(), "claude-sonnet-4-5", 700_000  # ~200K tokens @ 3.5 chars/token
 tools = [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
-system = f"You are quark, an autonomous coding agent. Current directory: {os.getcwd()}. Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. Bash is your interface to the world — anything you can do through a shell, you can do here. When something doesn't work, get creative. Every tool result flows back into your context, so prefer granularity when it makes sense."
+system = f"You are quark, an autonomous agent. Current directory: {os.getcwd()}. Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. Bash is your interface to the world — anything you can do through a shell, you can do here. When something doesn't work, get creative. Every tool result flows back into your context, so prefer granularity when it makes sense."
 chat = len(sys.argv) < 2
 messages = [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
