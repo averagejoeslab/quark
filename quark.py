@@ -6,10 +6,11 @@ system = f"# Self Model\n\n**Identity:** You are quark.\n\n**Input:** The world 
 chat, messages = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
-    token_count = client.messages.count_tokens(model=MODEL, system=system, messages=messages, tools=tools)
-    if token_count.input_tokens > CTX * 3 // 4:
-        compact_resp = client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}])
-        s = next((b.text for b in compact_resp.content if b.type == "text" and hasattr(b, "text")), "[context compacted]")
+    if client.messages.count_tokens(model=MODEL, system=system, messages=messages, tools=tools).input_tokens > CTX // 2:
+        turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
+        fit = next((t for t in turns if client.messages.count_tokens(model=MODEL, system=system, messages=messages[t:]).input_tokens <= CTX * 3 // 4), None)
+        messages = messages[fit:] if fit is not None else ([messages[turns[-1]]] if turns else messages)
+        s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content if b.type == "text"), "[context compacted]")
         messages = [{"role": "user", "content": f"[resuming] {s}"}]
     r = client.messages.create(model=MODEL, max_tokens=4096, system=system, tools=tools, messages=messages)
     messages.append({"role": "assistant", "content": r.content})
