@@ -27,7 +27,7 @@ while True:
                     if s := next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.text.strip()), None): break
                 except BadRequestError: raise
                 except: pass
-            messages = [{"role": "user", "content": f"[your prior working memory, compacted] {s}"}]; drop = 0; continue
+            messages = [{"role": "user", "content": f"[your prior working memory, summarized] {s}"}]; drop = 0; continue
         with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=tools, messages=messages) as stream:
             for ev in stream:
                 if interrupt.is_set(): break
