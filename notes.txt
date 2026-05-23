@@ -355,15 +355,54 @@ When this conversation is summarized via compaction, the next instance of me nee
 
 ---
 
-## WHERE WE LEFT OFF
+## WHERE WE LEFT OFF — UPDATED WITH FINAL FRAMING + REFACTOR APPLIED
 
-- Just completed a thorough walk through every harness-injected text, verifying alignment with cognitive frame
-- User pointed out the deeper framing: observe-think-act loop with three models, bidirectional causation
-- User asked me to persist this framing to notes.txt before context compaction
-- **USER PICKED OPTION C** for the saying-as-tool question: bash is quark's "body" (singular act-affector). Cognitive distinction (act on world vs others vs self) lives in the semantic content of the bash command, not in separate channels. Human-body analogy: we have one body, use it for both wood-chopping and conversation, yet don't conflate them.
-- Pending: apply Phase 1 system prompt restructure (now with Option C body framing in Output section)
-- Pending: decide whether to rename perceive → observe
-- Pending: decide on implementation depth (C.1 soft = prompt only, C.2 strict = suppress text stream, C.3 hybrid = both visible)
+### Final cognitive framing (the user's exact words)
+
+> "the context window is the mind where we think, the tools are the body which we use to act/observe, and this makes up the self model. Everything outside of that is either the world or other selves and we have a WORLD MODEL and OTHER SELVES MODEL for each."
+
+This is the canonical framing. Mind + Body = Self Model. Three first-class models total:
+1. **Self Model** = Mind (context window) + Body (tools)
+2. **World Model** = environment outside self
+3. **Other Selves Model** = entities with their own self-models
+
+### Refactor APPLIED (in this conversation, before compaction)
+
+1. **System prompt restructured** to align with the final framing:
+   - Self Model now contains: Identity, Mind, Body, Loop, Long-term memory
+   - World Model contains: Environment, Where, When (no longer nests Other selves)
+   - Other Selves Model is a top-level section (promoted from being nested)
+   - Body Operations section enumerates acts and observes by target (self/world/others)
+   - Mechanics section unchanged (embedded source code)
+
+2. **Bash output now prints to user terminal** (L60-61 area, +1 line):
+   - `out = doing.stdout.read()` captures the output (for model via tool_result)
+   - NEW: `if out: print(out, end="")` shows output to user
+   - This makes `echo`/`printf` function as the body's communication channel to other selves (the user)
+   - Aligns with Option C (chosen earlier): bash is the singular body, communication happens via echo
+
+### What changed in quark.py
+
+- Line count: 70 → 71 (one added line for bash output printing)
+- System prompt content: restructured but token count similar (~1500-1700 tokens)
+- Variable names: unchanged (working_memory, perceive, saying, doing — still apt)
+- ESC constants: unchanged (ESC_SAYING, ESC_DOING — channel-specific descriptors still valid)
+- Tool execution: now prints bash output to user terminal in addition to capturing for model
+
+### What still needs alignment
+
+- README is now out of date — needs to reflect:
+  - New three-model structure (Self/World/Other Selves)
+  - Mind + Body framing
+  - Body Operations section
+  - The fact that bash output now reaches user
+  - 71 line count
+
+### Pending decisions (none urgent)
+
+- Whether to rename `perceive` → `observe` for stricter alignment with loop primitives
+- Whether to enable extended thinking (would show model's internal monologue as "thinking" blocks separate from text)
+- Whether to track recipient identity if multiple humans/agents are interacting
 
 ---
 
