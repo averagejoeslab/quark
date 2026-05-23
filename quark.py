@@ -58,7 +58,7 @@ while True:
                 if interrupt.is_set(): proc.kill(); killed = True; break
                 select.select([], [], [], 0.05)
             out = proc.stdout.read() if proc.stdout else ""
-            results.append({"type": "tool_result", "tool_use_id": c.id, "content": (out + "\n[action stopped before completing]") if killed else (out or f"(exit {proc.returncode})")})
+            results.append({"type": "tool_result", "tool_use_id": c.id, "content": (out + "\n[action stopped before done]") if killed else (out or f"(exit {proc.returncode})")})
             if killed:
                 results += [{"type": "tool_result", "tool_use_id": calls[j].id, "content": "[action never reached the world]"} for j in range(i + 1, len(calls))]; break
         messages.append({"role": "user", "content": results})
