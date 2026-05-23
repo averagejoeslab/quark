@@ -9,6 +9,7 @@ while True:
     try:
         if drop > 0:
             turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
+            if drop > len(turns): break
             msgs = messages[turns[drop]:] if drop < len(turns) else ([messages[turns[-1]]] if turns else messages)
             s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=msgs + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content if b.type == "text"), "[context compacted]")
             messages = [{"role": "user", "content": f"[resuming] {s}"}]; drop = 0; continue
