@@ -9,60 +9,60 @@ def mechanics(): return "\n".join('def system(): return "<system prompt redacted
 def system(): return f"# Self Model\n\n**Identity:** You are quark — a self in a world that contains other selves.\n\n**Input:** World acts on you via inputs.\n- from other selves — text (their intent and context)\n- from the environment — bash results (prefer focused actions to keep small if possible)\n\n**Output:** You act on world via outputs. Be creative when stuck.\n- to other selves — text (clear, direct, useful)\n- to the environment — bash, one per response (prefer focused actions to keep results small if possible)\n\n**Memory:** Two layers.\n- **Working memory:** your current context — this conversation, system, tools. Volatile; summarized when full.\n- **Long-term memory:** at `.quark/memory/memory.md`. Persists across sessions. Append-only; newest at bottom. Write things worth remembering; Write/Read on demand.\n\nInitialize if missing:\nmkdir -p .quark/memory && [ ! -f .quark/memory/memory.md ] && echo \"# Quark Memory\" > .quark/memory/memory.md\n\nFormat (preserve exactly):\n## YYYY-MM-DD HH:MM:SS\n- one observation per bullet\n\nWrite with heredoc (required):\ncat >> .quark/memory/memory.md << EOF\n\n## $(date '+%Y-%m-%d %H:%M:%S')\n- Learned X\nEOF\n\nRead strategies:\n- recent — `tail -50 .quark/memory/memory.md`\n- by subject — `grep \"topic\" .quark/memory/memory.md`\n- by date — `grep \"## 2026-05\" .quark/memory/memory.md`\n- with context — `grep -A 10 \"## 2026\" .quark/memory/memory.md`\n\nInspect memory for novel read strategies if existing do not provide what is needed.\n\n# World Model\n\n**Environment:** terminal — bash acts on.\n**Other selves:** entities in the environment with their own self-model — humans, other agents reaching you through text.\n\n**Where:** {os.getcwd()}\n**When:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n# Mechanics\n\nThis code is your harness — shown so you know your self mechanics. The system prompt is redacted below because this is your system prompt.\n\n```python\n{mechanics()}\n```"
 ESC_SAYING = "[other self interrupted what you were saying — acknowledge]"
 ESC_DOING = "[other self interrupted what you were doing — acknowledge]"
-chat, messages, drop = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}], 0
+chat, working_memory, drop = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}], 0
 
-def listen(stop):
+def perceive(stop):
     while not stop.is_set():
         if select.select([sys.stdin], [], [], 0.1)[0] and sys.stdin.read(1) == "\x1b": interrupt.set(); return
 
 while True:
-    tty.setcbreak(sys.stdin); stop = threading.Event(); t = threading.Thread(target=listen, args=(stop,), daemon=True); t.start()
+    tty.setcbreak(sys.stdin); stop = threading.Event(); t = threading.Thread(target=perceive, args=(stop,), daemon=True); t.start()
     try:
         if drop > 0:
-            turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
+            turns = [i for i, m in enumerate(working_memory) if m["role"] == "user" and isinstance(m["content"], str)]
             if drop > len(turns): break
-            msgs = messages[turns[drop]:] if drop < len(turns) else ([messages[turns[-1]]] if turns else messages)
+            msgs = working_memory[turns[drop]:] if drop < len(turns) else ([working_memory[turns[-1]]] if turns else working_memory)
             while True:
                 try:
                     if s := next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.text.strip()), None): break
                 except BadRequestError: raise
                 except: pass
-            messages = [{"role": "user", "content": f"[your prior working memory, summarized] {s}"}]; drop = 0; interrupt.clear(); continue
-        with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=tools, messages=messages) as stream:
+            working_memory = [{"role": "user", "content": f"[your prior working memory, summarized] {s}"}]; drop = 0; interrupt.clear(); continue
+        with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=tools, messages=working_memory) as stream:
             for ev in stream:
                 if interrupt.is_set(): break
                 if ev.type == "content_block_delta" and hasattr(ev.delta, "text"): sys.stdout.write(ev.delta.text); sys.stdout.flush()
-            snap = stream.current_message_snapshot
+            saying = stream.current_message_snapshot
         print()
         if interrupt.is_set():
-            if snap.content:
-                messages.append({"role": "assistant", "content": snap.content})
-                if tu := [b for b in snap.content if b.type == "tool_use"]:
-                    messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": b.id, "content": "[your doing never reached the world]"} for b in tu]})
-            messages.append({"role": "user", "content": ESC_SAYING}); interrupt.clear(); continue
-        messages.append({"role": "assistant", "content": snap.content})
-        calls = [b for b in snap.content if b.type == "tool_use"]
+            if saying.content:
+                working_memory.append({"role": "assistant", "content": saying.content})
+                if tu := [b for b in saying.content if b.type == "tool_use"]:
+                    working_memory.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": b.id, "content": "[your doing never reached the world]"} for b in tu]})
+            working_memory.append({"role": "user", "content": ESC_SAYING}); interrupt.clear(); continue
+        working_memory.append({"role": "assistant", "content": saying.content})
+        calls = [b for b in saying.content if b.type == "tool_use"]
         if not calls:
             stop.set(); t.join(timeout=0.2); termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs)
             if not chat or (u := input("\n> ")) == "/q": break
-            if u.strip(): messages.append({"role": "user", "content": u})
+            if u.strip(): working_memory.append({"role": "user", "content": u})
             continue
         results = []
         for i, c in enumerate(calls):
             if interrupt.is_set():
                 results += [{"type": "tool_result", "tool_use_id": calls[j].id, "content": "[your doing never reached the world]"} for j in range(i, len(calls))]; break
             print(f"$ {c.input['cmd']}")
-            proc = subprocess.Popen(c.input["cmd"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            doing = subprocess.Popen(c.input["cmd"], shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             killed = False
-            while proc.poll() is None:
-                if interrupt.is_set(): proc.kill(); killed = True; break
+            while doing.poll() is None:
+                if interrupt.is_set(): doing.kill(); killed = True; break
                 select.select([], [], [], 0.05)
-            out = proc.stdout.read() if proc.stdout else ""
-            results.append({"type": "tool_result", "tool_use_id": c.id, "content": (out + "\n[your doing stopped before done]") if killed else (out or f"(exit {proc.returncode})")})
+            out = doing.stdout.read() if doing.stdout else ""
+            results.append({"type": "tool_result", "tool_use_id": c.id, "content": (out + "\n[your doing stopped before done]") if killed else (out or f"(exit {doing.returncode})")})
             if killed:
                 results += [{"type": "tool_result", "tool_use_id": calls[j].id, "content": "[your doing never reached the world]"} for j in range(i + 1, len(calls))]; break
-        messages.append({"role": "user", "content": results})
-        if interrupt.is_set(): messages.append({"role": "user", "content": ESC_DOING}); interrupt.clear()
+        working_memory.append({"role": "user", "content": results})
+        if interrupt.is_set(): working_memory.append({"role": "user", "content": ESC_DOING}); interrupt.clear()
     except BadRequestError as e:
         if "prompt is too long" not in str(e): raise
         drop += 1
