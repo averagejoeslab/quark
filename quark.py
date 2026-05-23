@@ -1,8 +1,7 @@
 import subprocess, sys, os, datetime, termios, tty, threading, select, atexit
 from anthropic import Anthropic, BadRequestError
 
-_attrs = termios.tcgetattr(sys.stdin)
-atexit.register(lambda: termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs))
+_attrs = termios.tcgetattr(sys.stdin); atexit.register(lambda: termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs))
 interrupt = threading.Event()
 
 client, MODEL, tools = Anthropic(), "claude-sonnet-4-5", [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
@@ -16,15 +15,13 @@ def listen(stop):
 
 while True:
     if interrupt.is_set(): messages.append({"role": "user", "content": ESC_MSG}); interrupt.clear()
-    tty.setcbreak(sys.stdin); stop = threading.Event()
-    t = threading.Thread(target=listen, args=(stop,), daemon=True); t.start()
+    tty.setcbreak(sys.stdin); stop = threading.Event(); t = threading.Thread(target=listen, args=(stop,), daemon=True); t.start()
     try:
         if drop > 0:
             turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
             if drop > len(turns): break
             msgs = messages[turns[drop]:] if drop < len(turns) else ([messages[turns[-1]]] if turns else messages)
-            resp = client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=msgs + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}])
-            s = next((b.text for b in resp.content if b.type == "text"), "[context compacted]")
+            s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=msgs + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content if b.type == "text"), "[context compacted]")
             messages = [{"role": "user", "content": f"[resuming] {s}"}]; drop = 0; continue
         with client.messages.stream(model=MODEL, max_tokens=4096, system=system, tools=tools, messages=messages) as stream:
             for ev in stream:
@@ -42,8 +39,7 @@ while True:
         calls = [b for b in snap.content if b.type == "tool_use"]
         if not calls:
             stop.set(); t.join(timeout=0.2); termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs)
-            if not chat: break
-            if (u := input("\n> ")) == "/q": break
+            if not chat or (u := input("\n> ")) == "/q": break
             if u.strip(): messages.append({"role": "user", "content": u})
             continue
         results = []
