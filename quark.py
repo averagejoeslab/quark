@@ -1,18 +1,21 @@
 import subprocess, sys, os, datetime
-from anthropic import Anthropic
+from anthropic import Anthropic, BadRequestError
 
-client, MODEL, CTX, tools = Anthropic(), "claude-sonnet-4-5", 200_000, [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]  # CTX = sonnet 4.5 context window in tokens
+client, MODEL, tools = Anthropic(), "claude-sonnet-4-5", [{"name": "bash", "description": "Run a shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
 system = f"# Self Model\n\n**Identity:** You are quark.\n\n**Input:** The world reaches you through input channels; each shapes what follows.\n- from other selves — text\n- from the environment — bash results (prefer focused actions to keep these small)\n\n**Output:** You act on the world through output channels. Get creative when stuck.\n- to other selves — text\n- to the environment — bash, one per response\n\n**Memory:** Your record of learning, at `.quark/memory/memory.md`. Append-only; newest at bottom. Write what's worth keeping; read on demand.\n\nInitialize if missing:\nmkdir -p .quark/memory && [ ! -f .quark/memory/memory.md ] && echo \"# Quark Memory\" > .quark/memory/memory.md\n\nFormat (preserve exactly):\n## YYYY-MM-DD HH:MM:SS\n- one observation per bullet\n\nWrite with a heredoc (portable):\ncat >> .quark/memory/memory.md << EOF\n\n## $(date '+%Y-%m-%d %H:%M:%S')\n- Learned X\nEOF\n\nRead:\n- `tail -50 .quark/memory/memory.md` — recent\n- `grep \"topic\" .quark/memory/memory.md` — by subject\n- `grep \"## 2026-05\" .quark/memory/memory.md` — by date\n- `grep -A 10 \"## 2026\" .quark/memory/memory.md` — with context\n\nInspect (`head`, `wc`, `sed`) for novel reads.\n\n# World Model\n\n**Where:** {os.getcwd()}\n**When:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-chat, messages = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
+chat, messages, drop = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}], 0
 
 while True:
-    if client.messages.count_tokens(model=MODEL, system=system, messages=messages, tools=tools).input_tokens > CTX // 2:
-        turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
-        fit = next((t for t in turns if client.messages.count_tokens(model=MODEL, system=system, messages=messages[t:]).input_tokens <= CTX * 3 // 4), None)
-        messages = messages[fit:] if fit is not None else ([messages[turns[-1]]] if turns else messages)
-        s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content if b.type == "text"), "[context compacted]")
-        messages = [{"role": "user", "content": f"[resuming] {s}"}]
-    r = client.messages.create(model=MODEL, max_tokens=4096, system=system, tools=tools, messages=messages)
+    turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
+    try:
+        if drop > 0:
+            msgs = messages[turns[drop]:] if drop < len(turns) else ([messages[turns[-1]]] if turns else messages)
+            s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=msgs + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content if b.type == "text"), "[context compacted]")
+            messages = [{"role": "user", "content": f"[resuming] {s}"}]; drop = 0; continue
+        r = client.messages.create(model=MODEL, max_tokens=4096, system=system, tools=tools, messages=messages)
+    except BadRequestError as e:
+        if "prompt is too long" not in str(e): raise
+        drop += 1; continue
     messages.append({"role": "assistant", "content": r.content})
     for b in r.content: b.type == "text" and b.text and print(b.text)
     calls = [b for b in r.content if b.type == "tool_use"]
