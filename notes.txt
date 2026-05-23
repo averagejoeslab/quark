@@ -384,10 +384,27 @@ This is the canonical framing. Mind + Body = Self Model. Three first-class model
 ### What changed in quark.py
 
 - Line count: 70 → 71 (one added line for bash output printing)
-- System prompt content: restructured but token count similar (~1500-1700 tokens)
-- Variable names: unchanged (working_memory, perceive, saying, doing — still apt)
-- ESC constants: unchanged (ESC_SAYING, ESC_DOING — channel-specific descriptors still valid)
+- System prompt content: restructured to three-model frame (token count similar)
 - Tool execution: now prints bash output to user terminal in addition to capturing for model
+- **Renames applied for cognitive alignment:**
+  - `perceive` (function) → `observe` — exact match to the loop's observe primitive
+  - `tools` (var) → `body` — the variable IS the body; passed as `tools=body` to API
+- ESC constants kept (ESC_SAYING, ESC_DOING): channel-specific descriptors of WHAT was interrupted (model's text stream vs body act). Still accurate under new frame.
+- Kept (already aligned or technical-only): working_memory (mind's conversation layer), saying/doing (channel descriptors), mechanics/system (functional), interrupt/stop/t/chat/drop (technical state)
+
+### Cognitive alignment scorecard
+
+| Concept | Where in code |
+|---|---|
+| Self Model | embedded in system() prompt |
+| Mind | `working_memory` (the conversation layer of context) |
+| Body | `body` (variable holding tools list); bash is the one body capability |
+| Loop: observe | `observe()` function (was perceive); also stream events are observations |
+| Loop: think | `client.messages.stream()` block; `saying = stream.current_message_snapshot` |
+| Loop: act | `doing = subprocess.Popen(...)` + bash output printed to terminal |
+| World Model | embedded in system() prompt |
+| Other Selves Model | embedded in system() prompt |
+| Interruption from other selves | `interrupt` Event set by `observe` thread on ESC keypress |
 
 ### What still needs alignment
 

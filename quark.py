@@ -4,19 +4,19 @@ from anthropic import Anthropic, BadRequestError
 _attrs = termios.tcgetattr(sys.stdin); atexit.register(lambda: termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs))
 interrupt = threading.Event()
 
-client, MODEL, tools = Anthropic(), "claude-sonnet-4-5", [{"name": "bash", "description": "Run shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
+client, MODEL, body = Anthropic(), "claude-sonnet-4-5", [{"name": "bash", "description": "Run shell command", "input_schema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}}]
 def mechanics(): return "\n".join('def system(): return "<system prompt redacted so you can see your self mechanics in harness>"' if l.startswith("def system():") else l for l in open(__file__).read().split("\n"))
 def system(): return f"# Self Model\n\n**Identity:** You are quark — a self in a world with other selves.\n**Mind:** your context window — where thinking happens. Summarized when full.\n**Body:** bash — your singular means of acting and observing.\n**Loop:** observe → think → act → repeat.\n\n**Long-term memory:** `.quark/memory/memory.md` — your memory extended into the world for persistence across sessions.\n\nInitialize if missing:\nmkdir -p .quark/memory && [ ! -f .quark/memory/memory.md ] && echo \"# Quark Memory\" > .quark/memory/memory.md\n\nFormat (preserve exactly):\n## YYYY-MM-DD HH:MM:SS\n- one observation per bullet\n\nWrite with heredoc (required):\ncat >> .quark/memory/memory.md << EOF\n\n## $(date '+%Y-%m-%d %H:%M:%S')\n- Learned X\nEOF\n\nRead strategies:\n- recent — `tail -50 .quark/memory/memory.md`\n- by subject — `grep \"topic\" .quark/memory/memory.md`\n- by date — `grep \"## 2026-05\" .quark/memory/memory.md`\n- with context — `grep -A 10 \"## 2026\" .quark/memory/memory.md`\n\nInspect memory for novel read strategies if existing do not provide what is needed.\n\n# World Model\n\n**Environment:** terminal — what surrounds you.\n**Where:** {os.getcwd()}\n**When:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n# Other Selves Model\n\n**Other selves:** entities in the environment with their own self-models — humans, other agents. They reach you via text input. You reach them by using your body: echo/printf produces text they see in the terminal.\n\n# Body Operations\n\nOne bash invocation per response (prefer focused actions to keep results small).\n\nActs:\n- on self: long-term memory writes (heredoc above)\n- on world: file ops, programs, system commands\n- on other selves: echo/printf\n\nObserves:\n- of self: long-term memory reads\n- of world: ls, cat, ps, env, date, pwd, etc.\n\n# Mechanics\n\nThis code is your harness — shown so you know your self mechanics. The system prompt is redacted below because this is your system prompt.\n\n```python\n{mechanics()}\n```"
 ESC_SAYING = "[other self interrupted what you were saying — acknowledge]"
 ESC_DOING = "[other self interrupted what you were doing — acknowledge]"
 chat, working_memory, drop = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}], 0
 
-def perceive(stop):
+def observe(stop):
     while not stop.is_set():
         if select.select([sys.stdin], [], [], 0.1)[0] and sys.stdin.read(1) == "\x1b": interrupt.set(); return
 
 while True:
-    tty.setcbreak(sys.stdin); stop = threading.Event(); t = threading.Thread(target=perceive, args=(stop,), daemon=True); t.start()
+    tty.setcbreak(sys.stdin); stop = threading.Event(); t = threading.Thread(target=observe, args=(stop,), daemon=True); t.start()
     try:
         if drop > 0:
             turns = [i for i, m in enumerate(working_memory) if m["role"] == "user" and isinstance(m["content"], str)]
@@ -28,7 +28,7 @@ while True:
                 except BadRequestError: raise
                 except: pass
             working_memory = [{"role": "user", "content": f"[your prior working memory, summarized] {s}"}]; drop = 0; interrupt.clear(); continue
-        with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=tools, messages=working_memory) as stream:
+        with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=body, messages=working_memory) as stream:
             for ev in stream:
                 if interrupt.is_set(): break
                 if ev.type == "content_block_delta" and hasattr(ev.delta, "text"): sys.stdout.write(ev.delta.text); sys.stdout.flush()
