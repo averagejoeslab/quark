@@ -6,9 +6,9 @@ system = f"# Self Model\n\n**Identity:** You are quark.\n\n**Input:** The world 
 chat, messages, drop = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}], 0
 
 while True:
-    turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
     try:
         if drop > 0:
+            turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
             msgs = messages[turns[drop]:] if drop < len(turns) else ([messages[turns[-1]]] if turns else messages)
             s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=msgs + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content if b.type == "text"), "[context compacted]")
             messages = [{"role": "user", "content": f"[resuming] {s}"}]; drop = 0; continue
