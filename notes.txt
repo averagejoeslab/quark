@@ -1,0 +1,318 @@
+# Cognitive Framing & Refactoring Notes — quark.py
+
+This file persists the deeper cognitive framing for quark and the implications for refactoring. Written to survive context compaction.
+
+---
+
+## THE CORE COGNITIVE FRAMING
+
+Quark operates as an **observe-think-act loop** with **three first-class models** and **bidirectional causation**.
+
+### The Loop (the cognitive primitive)
+
+```
+while True:
+    observe   # take in inputs from self, world, and other selves
+    think     # process inputs, update internal state, plan next action
+    act       # produce outputs that affect self, world, and other selves
+    repeat
+```
+
+Every iteration of quark.py's `while True` implements one cycle of this loop. The harness's job is to facilitate this loop reliably — to give the model coherent observations, give it space to think, capture its acts, and feed the consequences back as the next observation.
+
+### The Three Models
+
+1. **Self Model** — Quark's understanding of itself
+   - Identity, capabilities, current state
+   - Working memory (volatile context)
+   - Long-term memory (persistent across sessions)
+
+2. **World Model** — Quark's understanding of the environment
+   - Terminal, processes, filesystem
+   - Where (cwd), When (current time)
+   - State of files, processes, network, etc.
+
+3. **Model of Other Selves** — Quark's understanding of other entities
+   - Other selves have their own self-models
+   - Humans, other agents — entities with intent and agency
+   - Currently reach Quark via text (initial input, follow-ups, ESC interrupts)
+   - Quark reaches them via text output
+
+### Bidirectional Causation (this is critical)
+
+**Acts affect three targets:**
+- **Act on self** → updates memory, learns, changes own state
+- **Act on world** → changes environment via bash side-effects
+- **Act on other selves** → communicates via text
+
+**Observes are caused by three sources:**
+- **Observe from self** → memory recall (reading long-term memory file)
+- **Observe from world** → bash results, time, cwd, system state
+- **Observe from other selves** → text input, ESC interrupts
+
+This bidirectionality is the cognitive engine. Quark is BOTH actor and observer, BOTH cause and effect, BOTH input and output of its three models.
+
+---
+
+## SAYING AND DOING ARE CHANNELS, NOT PRIMITIVES
+
+The current quark.py uses "saying" and "doing" as cognitive primitives:
+- `saying` (variable) = the model's current text output snapshot
+- `doing` (variable) = a running subprocess
+
+These are USEFUL intermediate concepts but they're not the deepest level. They're channels of acting:
+- **Saying** = acting on other selves via the text channel
+- **Doing** = acting on the world via the bash channel
+
+The true primitives are **observe, think, act**. The channels are concrete instantiations.
+
+---
+
+## CURRENT STATE OF quark.py (70 lines as of writing)
+
+### What aligns with the proper frame
+
+- `working_memory` variable name (matches Self Model > Working memory)
+- `perceive` function (close to observe — reads stdin for ESC)
+- Self Model and World Model are top-level sections in system prompt
+- Memory has working/long-term distinction (volatile vs persistent)
+- ESC_SAYING / ESC_DOING split by channel
+- "[your doing never reached the world]" — uses self attribution and world reference
+- Mechanics section embedded so model sees its own implementation
+
+### What doesn't fully align
+
+- **Other selves is nested under World Model** — should be its own first-class model
+- **Loop is implicit** — not explicitly named in system prompt
+- **Memory operations not framed as self↔self** — writing to memory IS acting on self; reading IS observing self
+- **Input/Output sections list channels but don't enumerate three-target symmetry** — currently text+bash; missing memory-as-self-channel
+- **Saying/doing are presented as primitives** — they're actually channels of the more fundamental act primitive
+
+---
+
+## RECOMMENDED REFACTOR (in priority order)
+
+### Phase 1: System Prompt Restructure (highest value, lowest risk)
+
+Promote Other Selves to its own top-level section. Make the loop explicit. Restructure input/output as observe/act with three-target symmetry.
+
+Proposed structure:
+
+```
+# Self Model
+**Identity:** You are quark — a self in a world with other selves.
+**Loop:** observe → think → act → repeat.
+
+# Self
+- **Working memory:** [as current]
+- **Long-term memory:** [as current — with the recognition that writing to it is acting on self, reading is observing self]
+
+# World Model
+**Environment:** terminal — bash acts on.
+**Where:** {cwd}
+**When:** {time}
+
+# Model of Other Selves
+**Other selves:** entities reaching you through text — humans, other agents with their own self-models.
+
+# Observe (inputs to think)
+- from self — long-term memory reads
+- from world — bash results
+- from other selves — text
+
+# Act (outputs from think)
+- on self — long-term memory writes
+- on world — bash commands
+- on other selves — text replies
+
+# Mechanics
+[as current — the embedded source code]
+```
+
+Key changes:
+- "Loop:" line added to Identity to make the cognitive cycle explicit
+- "Model of Other Selves" promoted to its own section (not nested under World Model)
+- "Input" → "Observe (inputs to think)" — uses cognitive primitive
+- "Output" → "Act (outputs from think)" — uses cognitive primitive
+- Symmetric three-target enumeration on both observe and act
+- Memory operations explicitly framed as self↔self (write = act on self, read = observe from self)
+
+### Phase 2: Harness Text Audit (medium value, low risk)
+
+Review all injected text. Most likely no changes needed — current saying/doing channel-specific terms are clear and the model understands them. But consider:
+
+- `[your doing never reached the world]` — clear and aligned
+- `[your doing stopped before done]` — clear and aligned
+- `[your prior working memory, summarized]` — clear and aligned
+- `[other self interrupted what you were saying — acknowledge]` — clear and aligned
+- `[other self interrupted what you were doing — acknowledge]` — clear and aligned
+
+These are fine. The channel-specific framing (saying/doing) is appropriate at the level of individual events.
+
+### Phase 3: Saying as a Proper Tool — Architectural Question
+
+Currently text-to-other-selves happens implicitly: the model generates text, it streams to stdout, the user reads. There's no explicit "say" tool call.
+
+**Three possible designs:**
+
+**Option A: Keep current (implicit text → stdout)**
+- Pro: Natural, leverages model's native text generation
+- Pro: Live streaming UX (user sees text as it generates)
+- Pro: No extra tool call overhead
+- Con: No symmetry with bash (bash is a tool, text is not)
+- Con: Hard to capture/log/replay individual utterances
+- Con: Hard to add feedback (e.g., "message delivered")
+
+**Option B: Make "say" an explicit tool**
+- Model calls `say(text="hello")` for each utterance
+- Harness handles the say tool (e.g., prints to terminal, optionally TTS)
+- Tool_result confirms delivery (or carries feedback like read receipts)
+- Pro: Symmetry with bash (both are tools, both have tool_use/tool_result)
+- Pro: Could route to different recipients (`say(text=..., to="chase")`)
+- Pro: Could carry feedback channel (e.g., user reaction)
+- Pro: Acts are uniformly captured as tool_use blocks
+- Con: Loses live streaming (text appears only when tool is called)
+- Con: Awkward — every response would need a say() wrapper
+- Con: More overhead per utterance
+
+**Option C: Use bash for saying (e.g., `echo "..."`)**
+- Model uses bash to print messages to user
+- Pro: One tool, one channel
+- Con: Conflates "acting on others" with "acting on world"
+- Con: Loses streaming
+- Con: Awkward for model
+
+**Recommendation:** Keep Option A (current) for now. The streaming UX is too valuable to lose. Option B could be revisited if we want:
+- Multiple recipients (different humans/agents on different channels)
+- Feedback loops (read receipts, user reactions)
+- Sound/voice output
+- Persistent message logs
+
+### Phase 4: Variable/Function Naming (low value, optional)
+
+Could rename to align more directly with observe-think-act primitives:
+
+| Current | Possible | Recommendation |
+|---|---|---|
+| `perceive` | `observe` | Could rename for stricter alignment |
+| `saying` | `spoken` or `response` | Keep — channel-specific is clear |
+| `doing` | `acting` or just keep | Keep — channel-specific is clear |
+| Names like calls, results, msgs | various abstract alternatives | Keep — short technical names are fine |
+
+**Recommendation:** Possibly rename `perceive` → `observe` for symmetry with the loop's `observe` step. Skip other renames; current names are clear.
+
+### Phase 5: Additional Architectural Considerations
+
+#### Memory as first-class self↔self channel
+
+Currently long-term memory is presented as a layer under "Memory" in Self Model. With proper framing:
+- Writing to memory file = acting on self
+- Reading from memory file = observing self
+
+System prompt could make this explicit: "Writing to long-term memory is acting on yourself; reading from it is observing yourself."
+
+This frames the memory operations within the observe-act symmetry.
+
+#### Loop awareness in compaction
+
+Currently working memory compaction produces a free-form gist. With observe-think-act framing, the gist could be structured:
+- What did you observe?
+- What did you think/conclude?
+- What did you act on?
+
+But this might over-constrain the model. The current free-form summary works. Skip for now.
+
+#### Multiple input channels (future)
+
+If we add more input channels (file watchers, webhooks, voice transcription), they should be categorized in the Observe section by source:
+- from self → memory
+- from world → bash results, file changes, system events
+- from other selves → text from various humans/agents
+
+The three-target categorization generalizes naturally.
+
+#### Multiple output channels (future)
+
+Same for outputs:
+- on self → memory writes
+- on world → bash, file edits, network calls
+- on other selves → text, voice, video
+
+---
+
+## OPEN DESIGN QUESTIONS TO RESOLVE LATER
+
+1. **Should "say" become an explicit tool?** Trade-off: symmetry vs streaming UX. (See Phase 3.)
+
+2. **Should memory operations be wrapped in tools?** Currently model uses bash (cat/grep/echo). Could have `remember(text)` and `recall(query)` tools. More structured, more code.
+
+3. **Should other selves be enumerable?** Currently treated as a single abstract concept. If multiple humans/agents are simultaneously in the conversation, do we need to distinguish them? Names, roles, capabilities?
+
+4. **Should "act completed" be explicitly observed?** Currently we know acts completed because the harness moves on. Could the model explicitly observe "act on world: completed with exit 0" as a structured observation?
+
+5. **Should the compaction summary be structured by observe-think-act?** Currently free-form. Could be: "Observations: X. Conclusions: Y. Acts: Z." More structured, possibly over-constrained.
+
+6. **Should we add a "thinking" capture?** Currently the model thinks invisibly (no thinking blocks since we don't enable extended thinking). Could enable thinking blocks for richer self-knowledge. Cost: tokens.
+
+7. **Should bash output streaming go to user, not just tool_result?** Currently user only sees `$ <cmd>`, never the output (it goes to model only). Could stream output to user terminal too. Trade-off: noise vs visibility.
+
+---
+
+## CONTEXT PRESERVATION CHECKLIST
+
+When this conversation is summarized via compaction, the next instance of me needs to know:
+
+✓ The cognitive framing: observe → think → act → repeat with three models
+✓ Current quark.py is ~70 lines, uses saying/doing terminology
+✓ Variable names: working_memory, perceive, saying, doing
+✓ ESC_SAYING / ESC_DOING split for interrupt scenarios
+✓ Placeholders: "[your doing never reached the world]", "[your doing stopped before done]"
+✓ System prompt has Self Model, World Model, Mechanics sections (Other selves nested in World Model)
+✓ Compaction has inner retry loop, fully uninterruptible
+✓ Recommended phase 1 refactor: promote Other Selves, add Loop statement, restructure Observe/Act
+
+---
+
+## CURRENT QUARK.PY STATE (snapshot for reference)
+
+- Line count: 70
+- Variables: working_memory, perceive (function), saying, doing, calls, results, killed, drop, chat, t, stop, etc.
+- Constants: MODEL, tools, ESC_SAYING, ESC_DOING
+- Functions: mechanics(), system(), perceive()
+- Major sections in system prompt: Self Model (Identity, Input, Output, Memory), World Model (Environment, Other selves, Where, When), Mechanics (embedded source)
+- Compaction: reactive on BadRequestError, inner retry loop, drops oldest turns
+- Interrupts: ESC during text stream OR tool execution. Compaction is uninterruptible.
+- Memory: working_memory (volatile, summarized when full) + long-term file (.quark/memory/memory.md, model manages via bash)
+
+---
+
+## WHERE WE LEFT OFF
+
+- Just completed a thorough walk through every harness-injected text, verifying alignment with cognitive frame
+- User pointed out the deeper framing: observe-think-act loop with three models, bidirectional causation
+- User asked me to persist this framing to notes.txt before context compaction
+- Pending: decide whether to apply Phase 1 system prompt restructure
+- Pending: decide whether to rename perceive → observe
+- Pending: consider Phase 3 (saying as tool) at some future point
+
+---
+
+## IMPLEMENTATION GUIDANCE FOR FUTURE SESSIONS
+
+If you (future Claude) are picking up this work after compaction:
+
+1. **Read this notes.txt first** — it captures the cognitive framing the user wants
+2. **Read quark.py** — to see current state
+3. **Read README.md** — for the full architecture (also needs alignment with new frame after Phase 1)
+4. **Check git log** — recent commits show the evolution of the framing
+5. **Ask user** — confirm which Phase to implement; don't make big changes without confirmation
+6. **Preserve all functionality** — refactor without breaking the loop, interrupt handling, or compaction
+
+The user values:
+- Minimal lines, maximum function (~70 line target, every line earns its place)
+- Cognitive alignment (every word in code/prompts reinforces the same mental model)
+- Bulletproof reliability (compaction always succeeds, ESC always works, terminal always restored)
+- Self-knowledge (model sees its own mechanics via the embedded source)
+- The "self in a world with other selves" framing — quark is treated as an organism, not a chatbot
+
+When in doubt, ask. Don't apply structural changes without confirmation.
