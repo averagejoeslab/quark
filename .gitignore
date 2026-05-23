@@ -1,1 +1,4 @@
 .quark/
+.venv/
+__pycache__/
+PROBLEMO.txt
