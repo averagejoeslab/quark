@@ -1,6 +1,6 @@
 # quark
 
-The smallest possible coding agent. 22 lines of Python. One bash tool. One loop. Auto-compacts when context fills. Persistent memory across sessions.
+An agentic organism. 22 lines of Python. One bash tool. One loop. Auto-compacts when context fills. Persistent memory across sessions.
 
 ## Use
 
