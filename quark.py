@@ -22,7 +22,7 @@ while True:
             turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
             if drop > len(turns): break
             msgs = messages[turns[drop]:] if drop < len(turns) else ([messages[turns[-1]]] if turns else messages)
-            s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory has filled. Compact it into a gist that preserves what matters for continuing."}]).content if b.type == "text"), "[prior context lost]")
+            s = next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.type == "text"), "[prior context lost]")
             messages = [{"role": "user", "content": f"[your prior working memory, compacted] {s}"}]; drop = 0; continue
         with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=tools, messages=messages) as stream:
             for ev in stream:
