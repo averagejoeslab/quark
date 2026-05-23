@@ -1,6 +1,6 @@
 # quark
 
-An agentic organism. 69 lines of Python. One bash tool. One loop. Streaming responses. ESC-interruptible at any moment. Auto-compacts reactively on context overflow. Persistent memory across sessions. POSIX-only (uses `termios`).
+An agentic organism. 65 lines of Python. One bash tool. One loop. Streaming responses. ESC-interruptible at any moment. Auto-compacts reactively on context overflow. Persistent memory across sessions. POSIX-only (uses `termios`).
 
 ## Use
 
@@ -65,7 +65,7 @@ A persistent memory file (`.quark/memory/memory.md`) survives across sessions an
 
 | Component | Role |
 |---|---|
-| `quark.py` | The entire agent — 69 lines |
+| `quark.py` | The entire agent — 65 lines |
 | Anthropic SDK | `messages.stream()` (interruptible main calls), `messages.create()` (uninterruptible compaction), `BadRequestError` (overflow signal) |
 | `bash` tool | Only environmental affordance; runs via `subprocess.Popen` with interrupt-aware poll loop |
 | Listener thread | Daemon thread watching stdin in raw mode for ESC keypresses |
@@ -145,18 +145,17 @@ Both are snapshots captured once at startup. Quark can `bash`-execute `date` or 
 
 ## Execution flow
 
-### Startup (L1–11)
+### Startup (L1–10)
 
 1. **L1–2:** Imports — `subprocess`, `sys`, `os`, `datetime`, `termios`, `tty`, `threading`, `select`, `atexit`, `Anthropic`, `BadRequestError`.
-2. **L4:** `_attrs = termios.tcgetattr(sys.stdin)` — save current terminal attributes.
-3. **L5:** `atexit.register(...)` — guarantee terminal restoration on any exit path (clean exit, exception, Ctrl+C).
-4. **L6:** Create shared `interrupt = threading.Event()`.
-5. **L8:** Tuple-assign `client`, `MODEL`, `tools`. **No `CTX` constant** — model-agnostic.
-6. **L9:** Build the `system` prompt with `os.getcwd()` and `datetime.now()` snapshots.
-7. **L10:** Define `ESC_MSG` string constant.
-8. **L11:** Tuple-assign `chat` (True iff no CLI args), initial `messages` (cooked-mode `input("> ")` if no argv), and `drop = 0`.
+2. **L4:** Save current terminal attributes (`_attrs`) and register an `atexit` callback to restore them — guarantees cooked mode on any exit path (clean exit, exception, Ctrl+C).
+3. **L5:** Create shared `interrupt = threading.Event()`.
+4. **L7:** Tuple-assign `client`, `MODEL`, `tools`. **No `CTX` constant** — model-agnostic.
+5. **L8:** Build the `system` prompt with `os.getcwd()` and `datetime.now()` snapshots.
+6. **L9:** Define `ESC_MSG` string constant.
+7. **L10:** Tuple-assign `chat` (True iff no CLI args), initial `messages` (cooked-mode `input("> ")` if no argv), and `drop = 0`.
 
-### Listener function (L13–15)
+### Listener function (L12–14)
 
 ```python
 def listen(stop):
@@ -169,31 +168,29 @@ Loops until told to stop; does a 0.1s `select` on stdin; reads 1 char when data 
 
 ### Each loop iteration
 
-**L17–18: Deferred interrupt handling**
+**L16–17: Deferred interrupt handling**
 ```python
 while True:
     if interrupt.is_set(): messages.append({"role": "user", "content": ESC_MSG}); interrupt.clear()
 ```
 If `interrupt` is set from a previous iteration (e.g., ESC during compaction), append the ESC user message and clear the flag *before* starting the next API call.
 
-**L19–20: Enter work mode**
+**L18: Enter work mode** (one line)
 ```python
-tty.setcbreak(sys.stdin); stop = threading.Event()
-t = threading.Thread(target=listen, args=(stop,), daemon=True); t.start()
+tty.setcbreak(sys.stdin); stop = threading.Event(); t = threading.Thread(target=listen, args=(stop,), daemon=True); t.start()
 ```
-Switch terminal to raw mode (line buffering and echo off), create a fresh per-iteration `stop` Event, spawn the daemon listener.
+Switch terminal to raw mode (line buffering and echo off), create a fresh per-iteration `stop` Event, spawn the daemon listener — all combined on one statement line.
 
-**L21: `try:`** — the work-phase body is wrapped so `finally` (L68–69) can always restore state.
+**L19: `try:`** — the work-phase body is wrapped so `finally` (L64–65) can always restore state.
 
-**L22–28: Compaction branch (`drop > 0`)**
+**L20–25: Compaction branch (`drop > 0`)**
 - Compute `turns` (user-text indices).
 - If `drop > len(turns)`: the last-user-text fallback already failed last iter — `break`.
 - Slice: `messages[turns[drop]:]` if `drop < len(turns)`, else `[messages[turns[-1]]]` (just last user-text).
-- Make a **non-streaming** API call with the compaction directive — runs to completion uninterruptibly.
-- Extract the text from the response (`next()` with fallback string for safety).
+- Make a **non-streaming** API call with the compaction directive (inlined into `next()`) — runs to completion uninterruptibly. Extract the text from the response (`next()` with fallback string for safety).
 - Replace `messages = [{"role": "user", "content": f"[resuming] {s}"}]`, reset `drop = 0`, `continue`.
 
-**L29–33: Streaming main API call**
+**L26–30: Streaming main API call**
 ```python
 with client.messages.stream(...) as stream:
     for ev in stream:
@@ -207,9 +204,9 @@ with client.messages.stream(...) as stream:
 - Live-print text deltas as they arrive (token-by-token UX).
 - Capture the snapshot before the `with` exits (closes the connection, cancels the request server-side if we broke).
 
-**L34: `print()`** — newline to terminate the streamed text.
+**L31: `print()`** — newline to terminate the streamed text.
 
-**L35–40: Interrupt-during-stream handler**
+**L32–37: Interrupt-during-stream handler**
 ```python
 if interrupt.is_set():
     if snap.content:
@@ -223,17 +220,23 @@ if interrupt.is_set():
 ```
 Two-step boundary closure: (1) append assistant snapshot + paired `tool_result` placeholders for any `tool_use` blocks; (2) append the ESC user message as a new turn boundary. Skip step 1 if no content arrived before interrupt.
 
-**L41: Normal-path append** — `messages.append({"role": "assistant", "content": snap.content})`.
+**L38: Normal-path append** — `messages.append({"role": "assistant", "content": snap.content})`.
 
-**L42: Gather `tool_use` blocks** — `calls = [b for b in snap.content if b.type == "tool_use"]`.
+**L39: Gather `tool_use` blocks** — `calls = [b for b in snap.content if b.type == "tool_use"]`.
 
-**L43–48: No-calls branch (model returned text-only)**
+**L40–44: No-calls branch (model returned text-only)**
+```python
+if not calls:
+    stop.set(); t.join(timeout=0.2); termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs)
+    if not chat or (u := input("\n> ")) == "/q": break
+    if u.strip(): messages.append({"role": "user", "content": u})
+    continue
+```
 - Stop the listener thread, join with 0.2s timeout, restore cooked mode.
-- If one-shot: `break`.
-- Read next user input via `input("\n> ")` (cooked mode, line-buffered).
-- `/q` exits; non-empty input becomes the next user message; `continue`.
+- One-shot exit and `/q` exit combined via short-circuit `or` — `input()` only evaluates in chat mode.
+- Non-empty input becomes the next user message; `continue`.
 
-**L49–62: Tool execution loop**
+**L45–58: Tool execution loop**
 ```python
 results = []
 for i, c in enumerate(calls):
@@ -260,17 +263,17 @@ Each tool gets:
 - A `Popen` invocation (instead of `getoutput`) so we can poll for interrupt.
 - A 50ms-tick poll loop that kills the process on interrupt.
 - A post-exit drain of stdout (captures buffered bytes after kill).
-- A `tool_result` entry: real output for normal completion, `partial + "[interrupted]"` for killed, `[interrupted — not run]` for never-started.
+- A `tool_result` entry that tells the truth about what happened: **real output for normal completion (no marker), `partial + "[interrupted]"` for killed, `[interrupted — not run]` for never-started.** The `killed` variable is what distinguishes "this tool was killed by us" from "ESC was pressed sometime" — preserving accurate per-tool labels so the model can reason properly.
 
-**L63: Append all results** as one user message — `tool_use`/`tool_result` pairing satisfied for every block.
+**L59: Append all results** as one user message — `tool_use`/`tool_result` pairing satisfied for every block.
 
-**L64: Post-tool ESC append**
+**L60: Post-tool ESC append**
 ```python
 if interrupt.is_set(): messages.append({"role": "user", "content": ESC_MSG}); interrupt.clear()
 ```
 If the loop exited because of interrupt, append the ESC user message and clear the flag.
 
-**L65–67: `BadRequestError` handler**
+**L61–63: `BadRequestError` handler**
 ```python
 except BadRequestError as e:
     if "prompt is too long" not in str(e): raise
@@ -278,7 +281,7 @@ except BadRequestError as e:
 ```
 Only context-overflow errors trigger recovery; other 400s propagate. Drop counter advances; next iteration handles compaction.
 
-**L68–69: `finally:` cleanup**
+**L64–65: `finally:` cleanup**
 ```python
 finally:
     stop.set(); t.join(timeout=0.2); termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs)
