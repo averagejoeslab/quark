@@ -6,8 +6,10 @@ system = f"# Self Model\n\n**Identity:** You are quark.\n\n**Input:** The world 
 chat, messages = len(sys.argv) < 2, [{"role": "user", "content": " ".join(sys.argv[1:]) or input("> ")}]
 
 while True:
-    if sum(len(str(m["content"])) for m in messages) > CTX * 3 // 4:
-        s = client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}]).content[0].text
+    token_count = client.messages.count_tokens(model=MODEL, system=system, messages=messages, tools=tools)
+    if token_count.input_tokens > CTX * 3 // 4:
+        compact_resp = client.messages.create(model=MODEL, max_tokens=2048, system=system, messages=messages + [{"role": "user", "content": "Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."}])
+        s = next((b.text for b in compact_resp.content if b.type == "text" and hasattr(b, "text")), "[context compacted]")
         messages = [{"role": "user", "content": f"[resuming] {s}"}]
     r = client.messages.create(model=MODEL, max_tokens=4096, system=system, tools=tools, messages=messages)
     messages.append({"role": "assistant", "content": r.content})
