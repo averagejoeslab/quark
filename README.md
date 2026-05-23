@@ -1,10 +1,10 @@
 # quark
 
-The smallest possible coding agent. 22 lines. One bash tool. One loop. Auto-compacts when the context window fills up. Persistent memory across sessions.
+The smallest possible coding agent. 22 lines of Python. One bash tool. One loop. Auto-compacts when context fills. Persistent memory across sessions.
 
 ## Use
 
-Install [uv](https://docs.astral.sh/uv/) (one-time, if you don't have it):
+Install [uv](https://docs.astral.sh/uv/) (one-time):
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
@@ -16,91 +16,105 @@ Set up and run:
 ```sh
 uv venv
 uv pip install anthropic
-export ANTHROPIC_API_KEY=sk-ant-...                                      # or: source .env
-uv run quark.py "list the files and tell me what this project is"        # one-shot
-uv run quark.py                                                          # chat (Ctrl+C or /q to exit)
+export ANTHROPIC_API_KEY=sk-ant-...
+uv run quark.py "your task here"   # one-shot — exits when the model stops calling tools
+uv run quark.py                     # chat — prompts for follow-ups; type /q (or Ctrl+C) to exit
 ```
 
-## How it works
+## Architecture
 
-Claude calls `bash`, you feed stdout+stderr back as a string, repeat until Claude stops calling tools. Failures aren't handled — the model reads the error and decides what to do next.
+One Python loop, one tool. Each turn:
 
-When the conversation grows past 75% of the model's context window (measured by character length, using Anthropic's ~3.5 chars/token heuristic), quark asks Claude to compact its own working memory into a gist, then replaces the entire message history with that single `[resuming]` note. The next turn picks up from the gist.
+1. Sends the current conversation to Claude with a single tool defined (`bash`).
+2. Prints any text the model writes back.
+3. Runs any bash command the model calls; combined stdout/stderr becomes the next input.
+4. Repeats until the model stops calling tools (one-shot) or the user exits (chat).
 
-## Memory System
+When the conversation grows past 75% of the context window, quark asks the model to summarize its own state into a gist, then continues from that gist. A persistent memory file (`.quark/memory/memory.md`) survives across sessions and is read/written by the model on demand via bash.
 
-Quark has persistent semantic memory in `.quark/memory/memory.md` (append-only). 
+## Components
 
-**Two types of memory:**
-- **Working memory (the gist)**: Ephemeral compression at 75% capacity to continue current work
-- **Semantic memory (memory.md)**: Permanent knowledge accumulated across all sessions
+| | |
+|---|---|
+| `quark.py` | The entire agent — 22 lines |
+| Anthropic SDK | Talks to `claude-sonnet-4-5` |
+| `bash` tool | Only environmental affordance; runs via `subprocess.getoutput` (combined stdout/stderr, never raises) |
+| System prompt | Cognitive scaffold built at startup: Self Model + World Model |
+| `.quark/memory/memory.md` | Append-only markdown log; persists across runs |
 
-**Memory format:**
-```markdown
-## YYYY-MM-DD HH:MM:SS
-- Bullet point of knowledge
-- Another learning
-```
+## Prompting
 
-**How it works:**
-- Memories are NOT auto-loaded on startup (saves context)
-- Quark retrieves on-demand using bash: `cat`, `tail`, `grep` 
-- Session birth datetime enables temporal reasoning about memory recency
-- Quark writes memories when: learning something valuable, post-compaction, session end, or by judgment
-- Single append-only file - simple, searchable, grows forever
+The system prompt is structured as two cognitive representations.
 
-Example memory operations:
-```bash
-tail -50 .quark/memory/memory.md              # recent memories
-grep "python" .quark/memory/memory.md         # topic search
-grep "2026-05-22" .quark/memory/memory.md     # today's learnings
-```
+### Self Model — who quark is
+
+| Field | Content |
+|---|---|
+| **Identity** | "You are quark." No category labels (not "coding agent," not "AI assistant"). |
+| **Input** | How the world reaches quark — categorized by source: `from other selves — text`, `from the environment — bash results`. |
+| **Output** | How quark acts on the world: `to other selves — text`, `to the environment — bash (one per response)`. |
+| **Memory** | Path, format, write/read mechanics for the persistent log. |
+
+I/O channels are categorized by **what's at the other end** — another self vs the environment. This generalizes: a future webhook from another agent is "another self," a file watcher is "environment." The categorization shapes how quark responds (conversational vs operational).
+
+### World Model — where and when quark is
+
+| Field | Content |
+|---|---|
+| **Where** | `os.getcwd()` at startup |
+| **When** | `datetime.now()` at startup |
+
+Both are snapshots captured once. Quark can `bash`-execute `date` or `pwd` if it needs current values mid-session.
+
+### Compaction prompt
+
+When context exceeds 75%, a single user message is appended: *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* The model's gist replaces the entire message history, prefixed with `[resuming]`.
 
 ## Execution flow
 
-### Startup (L1–6)
-1. Load stdlib + `Anthropic` client.
-2. Tuple-assign `client`, `MODEL`, `CTX = 700_000` (~200K tokens at ~3.5 chars/token), and `tools` (single `bash` schema) on one line.
-3. Build the `system` prompt — captures `os.getcwd()` and `datetime.now()` **once** at startup; these are snapshots and do not refresh during the run. Includes memory system documentation.
-4. Tuple-assign `chat` (True iff no CLI args) and `messages` (one user message — joined argv, or `input("> ")` if none).
+### Startup (L1–7)
+1. Imports.
+2. Tuple-assign `client`, `MODEL`, `CTX = 700_000` (~200K tokens at ~3.5 chars/token), `tools`.
+3. Build the system prompt — `os.getcwd()` and `datetime.now()` baked in once.
+4. Tuple-assign `chat` (True iff no CLI args) and initial `messages` (joined argv or `input("> ")`).
 5. Enter `while True:`.
 
 ### Each loop iteration
-Every pass runs two phases: a size check, then the API call and response handling.
 
 **Phase 1 — size check (L9–11):**
 - Sum `len(str(m["content"]))` across all messages.
-- If total ≤ 75% of `CTX`: fall through.
-- If total > 75% of `CTX`: **compact**.
-  - One API call (L10): sends current `messages` + a final user message *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* Same `system`, no `tools`, max 2048 output tokens. Reads `.content[0].text` into `s`.
-  - L11: `messages` is **rebound** to `[{"role": "user", "content": f"[resuming] {s}"}]`. All prior history is unreachable.
-  - No `continue` — falls through to phase 2 in the same iteration. A compaction turn makes **two** API calls.
+- If ≤ 75% of `CTX`: fall through.
+- If > 75%: API call to summarize (same `system`, no tools, max 2048 tokens). Replace `messages` with a single `[resuming] <gist>` user message. *Compaction = 2 API calls per iteration (summary + main).*
 
 **Phase 2 — main turn (L12–22):**
-- L12: API call with full `system` + `tools` + `messages`.
-- L13: append assistant response (`r.content`, a list of blocks) to `messages`.
-- L14: short-circuit `for b in r.content: b.type == "text" and b.text and print(b.text)` — prints non-empty text blocks, silently skips everything else.
-- L15: collect `tool_use` blocks into `calls`.
+- L12: API call with system + tools + messages.
+- L13: Append assistant response (`r.content` block list) to messages.
+- L14: Short-circuit print of every non-empty text block.
+- L15: Collect `tool_use` blocks into `calls`.
 - L16 branch:
-  - **No calls + one-shot** (`chat == False`): L17 → `break`, program exits.
-  - **No calls + chat**: L18 prompts `\n> `, walrus binds the input to `u`. If `u == "/q"`: `break`. Otherwise L19 appends `u` as a user message + `continue`.
-  - **Has calls**: L20–21 build `results` — each iteration prints `$ <cmd>`, runs `subprocess.getoutput` (combined stdout+stderr, never raises), substitutes `(no output)` for empty, wraps in a `tool_result` block. L22 appends one user message with the full `results` list.
+  - **No calls + one-shot** (`chat == False`): L17 → `break`, exit.
+  - **No calls + chat**: L18 prompts `\n> `. `/q` exits silently; anything else appends as a user message and continues.
+  - **Has calls**: L20–21 — for each: print `$ <cmd>`, run via `subprocess.getoutput`, wrap as a `tool_result` with matching `tool_use_id`. L22 appends one user message containing all results.
 
-### Per-turn growth
-- Tool-call turn: +2 messages (assistant + user-tool_results).
-- Chat-text turn: +2 messages (assistant + user-text).
-- Compaction turn: history collapses to **1** message, then phase 2 appends — ending at ~2–3.
-
-### Long-haul trajectory
-1. **Cycles 1..N**: `messages` grows by 2 per turn. Phase 1 check stays under threshold.
-2. **Cycle N+1**: total chars cross 525,000. Phase 1 fires the summary call, history collapses to a single `[resuming]` message, phase 2 continues in the same iteration. Claude reads the gist and acts.
-3. **Cycles N+2..M**: normal growth resumes from the new baseline.
-4. Repeats indefinitely until the loop exits.
+### Per-turn message growth
+- Normal turn: +2 messages (assistant + user-text or user-tool_results).
+- Compaction turn: history collapses to 1, then phase 2 appends — ending at 2–3.
 
 ### Loop exits
-- **One-shot** (`python quark.py "task"`): exits as soon as Claude returns a response with no tool calls (L17 break).
-- **`/q`** (chat mode only): user types `/q` at the `\n> ` prompt → silent break (L18).
-- **Ctrl+C** or process kill: hard exit at any point.
+- **One-shot**: exits when the model responds with no tool calls.
+- **`/q`** (chat only): silent break.
+- **Ctrl+C / kill**: hard exit at any point.
 
 ### Restart
-A fresh `python quark.py ...` invocation is a clean slate. The Python process restarts from scratch: new client, new `system` prompt with fresh `cwd` and fresh `now()`, empty `messages` ready for a new initial user input. The gist from any prior conversation is gone, but **semantic memory persists** in `.quark/memory/memory.md` and can be retrieved on-demand.
+A fresh `uv run quark.py ...` is a clean Python process. New system prompt with fresh `cwd` and `now()`, empty `messages`. **Memory persists** — `.quark/memory/memory.md` survives every restart and quark can read or extend it any time via bash.
+
+## Memory mechanics
+
+`.quark/memory/memory.md` is a flat markdown log managed entirely by the model via bash. No Python code wires it up.
+
+- **Initialize** (if missing): `mkdir -p .quark/memory && [ ! -f ... ] && echo "# Quark Memory" > ...`
+- **Format** (contract): `## YYYY-MM-DD HH:MM:SS` header followed by `-` bullets per observation.
+- **Write**: heredoc append (portable across shells; avoids the `echo -e` portability bug).
+- **Read**: `tail` for recent, `grep "## 2026-05"` by date, `grep -A 10` for entries with bullets, `head`/`wc`/`sed` for novel queries.
+
+The format is a contract quark maintains so future-quark can grep reliably across sessions.
