@@ -1,6 +1,6 @@
 # quark
 
-An agentic organism. 22 lines of Python. One bash tool. One loop. Auto-compacts when context fills. Persistent memory across sessions.
+An agentic organism. 30 lines of Python. One bash tool. One loop. Auto-compacts reactively when the API rejects for context overflow. Persistent memory across sessions.
 
 ## Use
 
@@ -30,14 +30,16 @@ One Python loop, one tool. Each turn:
 3. Runs any bash command the model calls; combined stdout/stderr becomes the next input.
 4. Repeats until the model stops calling tools (one-shot) or the user exits (chat).
 
-When the conversation grows past 75% of the context window, quark asks the model to summarize its own state into a gist, then continues from that gist. A persistent memory file (`.quark/memory/memory.md`) survives across sessions and is read/written by the model on demand via bash.
+When the Anthropic API rejects a call with `"prompt is too long"`, quark drops the oldest conversation turn and asks the model to compact what's left into a gist. If that compaction call *also* overflows, quark drops one more turn and tries again. A counter (`drop`) walks the truncation level forward until either compaction succeeds or even the most-recent user-text alone is too big — at which point quark exits cleanly. No proactive token counting, no hardcoded context window size; the API itself signals when compaction is needed.
+
+A persistent memory file (`.quark/memory/memory.md`) survives across sessions and is read/written by the model on demand via bash.
 
 ## Components
 
 | | |
 |---|---|
-| `quark.py` | The entire agent — 22 lines |
-| Anthropic SDK | Talks to `claude-sonnet-4-5` |
+| `quark.py` | The entire agent — 30 lines |
+| Anthropic SDK | Talks to `claude-sonnet-4-5`; `BadRequestError` is the overflow signal |
 | `bash` tool | Only environmental affordance; runs via `subprocess.getoutput` (combined stdout/stderr, never raises) |
 | System prompt | Cognitive scaffold built at startup: Self Model + World Model |
 | `.quark/memory/memory.md` | Append-only markdown log; persists across runs |
@@ -68,45 +70,71 @@ Both are snapshots captured once. Quark can `bash`-execute `date` or `pwd` if it
 
 ### Compaction prompt
 
-When context exceeds 75%, a single user message is appended: *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* The model's gist replaces the entire message history, prefixed with `[resuming]`.
+When the API signals overflow, the recovery branch appends a single user message: *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* The model's gist replaces the entire message history, prefixed with `[resuming]`.
 
 ## Execution flow
 
 ### Startup (L1–7)
-1. Imports.
-2. Tuple-assign `client`, `MODEL`, `CTX = 700_000` (~200K tokens at ~3.5 chars/token), `tools`.
-3. Build the system prompt — `os.getcwd()` and `datetime.now()` baked in once.
-4. Tuple-assign `chat` (True iff no CLI args) and initial `messages` (joined argv or `input("> ")`).
+1. Imports — including `BadRequestError` for the overflow trigger.
+2. Tuple-assign `client`, `MODEL`, `tools` (just the `bash` schema). **No `CTX` constant** — model-agnostic.
+3. Build the `system` prompt — `os.getcwd()` and `datetime.now()` baked in once at startup; they don't refresh during a run.
+4. Tuple-assign `chat` (True iff no CLI args), initial `messages` (joined argv or `input("> ")`), and `drop = 0` (the recovery counter).
 5. Enter `while True:`.
 
 ### Each loop iteration
 
-**Phase 1 — size check (L9–11):**
-- Sum `len(str(m["content"]))` across all messages.
-- If ≤ 75% of `CTX`: fall through.
-- If > 75%: API call to summarize (same `system`, no tools, max 2048 tokens). Replace `messages` with a single `[resuming] <gist>` user message. *Compaction = 2 API calls per iteration (summary + main).*
+A single `try` block at the top routes between two modes via the `drop` counter; a single `except` handles the overflow signal.
 
-**Phase 2 — main turn (L12–22):**
-- L12: API call with system + tools + messages.
-- L13: Append assistant response (`r.content` block list) to messages.
-- L14: Short-circuit print of every non-empty text block.
-- L15: Collect `tool_use` blocks into `calls`.
-- L16 branch:
-  - **No calls + one-shot** (`chat == False`): L17 → `break`, exit.
-  - **No calls + chat**: L18 prompts `\n> `. `/q` exits silently; anything else appends as a user message and continues.
-  - **Has calls**: L20–21 — for each: print `$ <cmd>`, run via `subprocess.getoutput`, wrap as a `tool_result` with matching `tool_use_id`. L22 appends one user message containing all results.
+**Recovery mode — `drop > 0` (L10–15):**
+- L11: Compute `turns` — the index of every user-text message in `messages`. Each is a safe slice boundary (no orphaned `tool_result` blocks).
+- L12: If `drop > len(turns)`, the last-user-text fallback already failed last iteration — `break` and exit cleanly.
+- L13: Slice. If `drop < len(turns)`: `messages[turns[drop]:]` (drop oldest `drop` turns). Else: `[messages[turns[-1]]]` (just the most recent user-text — always tiny, effectively guaranteed to fit).
+- L14: Compaction API call with the truncated slice. `next()` with a fallback string handles the edge case of a response missing a text block.
+- L15: Replace `messages` with `[{"role": "user", "content": "[resuming] <gist>"}]`, reset `drop = 0`, `continue` — next iteration is normal mode.
+
+**Normal mode — `drop == 0` (L16):**
+- L16: Main API call with `system + tools + messages`.
+
+**On `BadRequestError` (L17–19):**
+- L18: If the message doesn't contain `"prompt is too long"`, re-raise — we don't mask unrelated 400s (rate limits, malformed requests, etc.).
+- L19: Otherwise `drop += 1; continue` — next iteration handles recovery with one more turn dropped.
+
+**On success — process response (L20–30):**
+- L20: Append assistant response (`r.content` block list) to `messages`.
+- L21: Short-circuit print of every non-empty text block in the response.
+- L22: Collect `tool_use` blocks into `calls`.
+- L23 branch:
+  - **No calls + one-shot** (`chat == False`): L24 → `break`, exit.
+  - **No calls + chat**: L25 prompts `\n> `. `/q` exits silently; non-empty input becomes the next user message via L26.
+  - **Has calls**: L28–29 build `results` — for each: print `$ <cmd>`, run via `subprocess.getoutput`, wrap as a `tool_result` with matching `tool_use_id`. L30 appends one user message containing all results.
+
+### Compaction state machine
+
+Walk-through assuming `messages` has `N` turns when overflow first hits:
+
+| Iter | `drop` at start | Action | Outcome | `drop` at end |
+|---|---|---|---|---|
+| 1 | 0 | Main call | overflow | 1 |
+| 2 | 1 | Compact with oldest 1 turn dropped | likely success | 0 |
+| 3 | 2 | (only if iter 2 also overflowed) | likely success | 0 |
+| … | … | … | … | … |
+| N+1 | N | Compact with just last user-text | guaranteed-fits | 0 |
+| N+2 | N+1 | `drop > len(turns)` → `break` | exit (pathological only) | — |
+
+`drop` increments by 1 on each failed call, resets to 0 on the first successful compaction. After success, `messages = [{"role": "user", "content": "[resuming] <gist>"}]` (one tiny message) and the next iteration runs normal mode.
 
 ### Per-turn message growth
 - Normal turn: +2 messages (assistant + user-text or user-tool_results).
-- Compaction turn: history collapses to 1, then phase 2 appends — ending at 2–3.
+- Compaction turn: history collapses to 1, then the next iteration appends normally.
 
 ### Loop exits
-- **One-shot**: exits when the model responds with no tool calls.
+- **One-shot** (CLI args present): exits when the model returns a response with no tool calls.
 - **`/q`** (chat only): silent break.
+- **Exhausted fallback**: `drop > len(turns)` — pathological only; in practice unreachable.
 - **Ctrl+C / kill**: hard exit at any point.
 
 ### Restart
-A fresh `uv run quark.py ...` is a clean Python process. New system prompt with fresh `cwd` and `now()`, empty `messages`. **Memory persists** — `.quark/memory/memory.md` survives every restart and quark can read or extend it any time via bash.
+A fresh `uv run quark.py ...` is a clean Python process. New system prompt with fresh `cwd` and `now()`, empty `messages`, `drop` back to 0. **Memory persists** — `.quark/memory/memory.md` survives every restart and quark can read or extend it any time via bash.
 
 ## Memory mechanics
 
