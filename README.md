@@ -1,6 +1,6 @@
 # quark
 
-An agentic organism. 30 lines of Python. One bash tool. One loop. Auto-compacts reactively when the API rejects for context overflow. Persistent memory across sessions.
+An agentic organism. 69 lines of Python. One bash tool. One loop. Streaming responses. ESC-interruptible at any moment. Auto-compacts reactively on context overflow. Persistent memory across sessions. POSIX-only (uses `termios`).
 
 ## Use
 
@@ -8,7 +8,6 @@ Install [uv](https://docs.astral.sh/uv/) (one-time):
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
-# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 Set up and run:
@@ -21,28 +20,97 @@ uv run quark.py "your task here"   # one-shot — exits when the model stops cal
 uv run quark.py                     # chat — prompts for follow-ups; type /q (or Ctrl+C) to exit
 ```
 
+### Interrupting quark with ESC
+
+After you hit Enter on a message, quark enters a "work phase" — running the model and any tools it requests. **Press ESC at any moment during work** to interrupt:
+
+- **During the model's response** → the stream stops, partial text is preserved
+- **During a bash command** → the process is killed, partial output is preserved
+- **Between operations** → quark yields immediately
+
+After an interrupt, quark closes out the in-flight state cleanly, appends a `[user interrupted you with ESC]` message to the conversation, and the model receives this on its next turn — naturally responding by acknowledging the interrupt and asking what you want to change.
+
+While you're **typing at the `>` prompt**, ESC is just a literal character — you can backspace it. ESC only matters between hitting Enter and seeing the next prompt.
+
 ## Architecture
 
-One Python loop, one tool. Each turn:
+```
+┌────────────────────────────────────────────────────────────┐
+│  Main thread                                               │
+│                                                            │
+│  ┌──────────────┐    ┌────────────────────────────────┐   │
+│  │  input()     │ →  │  work phase (raw mode)         │   │
+│  │  (cooked     │    │  • stream API call             │   │
+│  │   mode)      │    │  • execute bash tools (Popen)  │   │
+│  │              │    │  • check interrupt at every    │   │
+│  │              │    │    yield point                 │   │
+│  └──────────────┘    └────────────┬───────────────────┘   │
+│         ↑                         │                        │
+│         │                         │                        │
+│  ┌──────────────────────┐         │ reads                  │
+│  │  listener thread     │  sets   ▼                        │
+│  │  reads stdin (raw)   │ ──────► interrupt                │
+│  │  ESC → set flag      │         Event                    │
+│  └──────────────────────┘                                  │
+└────────────────────────────────────────────────────────────┘
+```
 
-1. Sends the current conversation to Claude with a single tool defined (`bash`).
-2. Prints any text the model writes back.
-3. Runs any bash command the model calls; combined stdout/stderr becomes the next input.
-4. Repeats until the model stops calling tools (one-shot) or the user exits (chat).
+Each user message kicks off a "work phase" — the model streams a response, quark runs any tool calls, the model is invoked again if needed, and so on until the model returns without a tool call. Throughout the work phase the terminal is in raw mode and a background thread watches stdin for ESC. When ESC fires, every yield point in the work phase checks the flag and bails out gracefully.
 
-When the Anthropic API rejects a call with `"prompt is too long"`, quark drops the oldest conversation turn and asks the model to compact what's left into a gist. If that compaction call *also* overflows, quark drops one more turn and tries again. A counter (`drop`) walks the truncation level forward until either compaction succeeds or even the most-recent user-text alone is too big — at which point quark exits cleanly. No proactive token counting, no hardcoded context window size; the API itself signals when compaction is needed.
+When the conversation grows past Anthropic's context window, the API rejects the next call with `BadRequestError` (`"prompt is too long"`). Quark catches it, drops the oldest turn from the messages array, and asks the model to compact what's left into a gist. A counter (`drop`) walks the truncation level forward across iterations until compaction succeeds.
 
-A persistent memory file (`.quark/memory/memory.md`) survives across sessions and is read/written by the model on demand via bash.
+A persistent memory file (`.quark/memory/memory.md`) survives across sessions and is read/written by the model on demand via bash. No Python code wires it up — the system prompt teaches the model how to use it.
 
 ## Components
 
-| | |
+| Component | Role |
 |---|---|
-| `quark.py` | The entire agent — 30 lines |
-| Anthropic SDK | Talks to `claude-sonnet-4-5`; `BadRequestError` is the overflow signal |
-| `bash` tool | Only environmental affordance; runs via `subprocess.getoutput` (combined stdout/stderr, never raises) |
-| System prompt | Cognitive scaffold built at startup: Self Model + World Model |
+| `quark.py` | The entire agent — 69 lines |
+| Anthropic SDK | `messages.stream()` (interruptible main calls), `messages.create()` (uninterruptible compaction), `BadRequestError` (overflow signal) |
+| `bash` tool | Only environmental affordance; runs via `subprocess.Popen` with interrupt-aware poll loop |
+| Listener thread | Daemon thread watching stdin in raw mode for ESC keypresses |
+| `interrupt` Event | Shared `threading.Event` — set by listener, checked at every yield point |
+| `drop` counter | Lazy compaction recovery state |
+| Terminal mode | Raw (`tty.setcbreak`) during work, cooked during `input()`; restored on exit via `atexit` |
+| System prompt | Cognitive scaffold: Self Model + World Model |
 | `.quark/memory/memory.md` | Append-only markdown log; persists across runs |
+
+## Interrupt model
+
+ESC is treated as a **user input** that happens to arrive at a non-standard moment. The model sees it as the start of a new turn and naturally yields back. Four invariants make this safe:
+
+1. **The Anthropic API requires every `tool_use` block to be paired with a matching `tool_result` block** in the next user message. Interrupts must never leave an orphaned `tool_use`.
+2. **Partial output is preserved** so the model knows what it had done before being stopped — like a human being interrupted mid-sentence retains the context.
+3. **Every interrupt closes out the current turn cleanly and starts a new turn** with a `[user interrupted you with ESC]` user-text message. Lazy compaction's turn-splitting works without any special handling.
+4. **The model handles the yield-back conversationally** because the ESC message's content directs it to. No special "interrupted" branch in code.
+
+### Three interrupt scenarios
+
+**A. ESC during model streaming**
+- Stream loop exits on next event check.
+- `current_message_snapshot` is captured (whatever blocks were completed or in-progress).
+- If snapshot has content: append assistant message. For any `tool_use` blocks, append a paired user message with `[interrupted — not run]` placeholder `tool_result`s.
+- Append `[user interrupted you with ESC…]` user message — new turn boundary.
+
+**B. ESC during bash execution**
+- Kill the in-flight subprocess (SIGKILL).
+- Drain partial output from the pipe (after kill, to catch buffered bytes).
+- Build complete `tool_result`s: real ones for completed tools, `partial + "\n[interrupted]"` for the killed tool, `[interrupted — not run]` for un-run tools.
+- Append the complete results as one user message (pairing satisfied).
+- Append the ESC user message — new turn boundary.
+
+**C. ESC during compaction**
+- The compaction call is intentionally **not** interruptible (it's brief — 2-3 seconds with `max_tokens=2048`).
+- The `interrupt` flag stays set; the deferred check at the top of the next iteration handles it by appending the ESC user message before the next API call.
+
+### Why compaction stays valid
+
+The turn-boundary predicate finds user-text messages:
+```python
+turns = [i for i, m in enumerate(messages) if m["role"] == "user" and isinstance(m["content"], str)]
+```
+
+Every interrupt scenario ends with an ESC user-text message, which becomes a new turn boundary. The `tool_use`/`tool_result` pairing is always closed *before* the ESC message. Slicing `messages[turns[drop]:]` is therefore always valid — no orphaned `tool_use`s can ever appear inside a slice.
 
 ## Prompting
 
@@ -53,11 +121,11 @@ The system prompt is structured as two cognitive representations.
 | Field | Content |
 |---|---|
 | **Identity** | "You are quark." No category labels (not "coding agent," not "AI assistant"). |
-| **Input** | How the world reaches quark — categorized by source: `from other selves — text`, `from the environment — bash results`. |
+| **Input** | How the world reaches quark, categorized by source: `from other selves — text`, `from the environment — bash results`. |
 | **Output** | How quark acts on the world: `to other selves — text`, `to the environment — bash (one per response)`. |
 | **Memory** | Path, format, write/read mechanics for the persistent log. |
 
-I/O channels are categorized by **what's at the other end** — another self vs the environment. This generalizes: a future webhook from another agent is "another self," a file watcher is "environment." The categorization shapes how quark responds (conversational vs operational).
+I/O channels are categorized by **what's at the other end** — another self vs the environment. Generalizes: a future webhook from another agent is "another self," a file watcher is "environment."
 
 ### World Model — where and when quark is
 
@@ -66,75 +134,188 @@ I/O channels are categorized by **what's at the other end** — another self vs 
 | **Where** | `os.getcwd()` at startup |
 | **When** | `datetime.now()` at startup |
 
-Both are snapshots captured once. Quark can `bash`-execute `date` or `pwd` if it needs current values mid-session.
+Both are snapshots captured once at startup. Quark can `bash`-execute `date` or `pwd` if it needs current values mid-session.
 
-### Compaction prompt
+### Special user messages
 
-When the API signals overflow, the recovery branch appends a single user message: *"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."* The model's gist replaces the entire message history, prefixed with `[resuming]`.
+| Message | Content | Purpose |
+|---|---|---|
+| Compaction directive | `"Your context is full. Compact it into a gist and persist the details most relevant to continuing forward."` | Appended as final user message in the compaction API call to trigger gist generation |
+| ESC user message | `"[user interrupted you with ESC — briefly acknowledge and ask what they want to change]"` | New turn boundary after every interrupt; directs the model to yield back |
 
 ## Execution flow
 
-### Startup (L1–7)
-1. Imports — including `BadRequestError` for the overflow trigger.
-2. Tuple-assign `client`, `MODEL`, `tools` (just the `bash` schema). **No `CTX` constant** — model-agnostic.
-3. Build the `system` prompt — `os.getcwd()` and `datetime.now()` baked in once at startup; they don't refresh during a run.
-4. Tuple-assign `chat` (True iff no CLI args), initial `messages` (joined argv or `input("> ")`), and `drop = 0` (the recovery counter).
-5. Enter `while True:`.
+### Startup (L1–11)
+
+1. **L1–2:** Imports — `subprocess`, `sys`, `os`, `datetime`, `termios`, `tty`, `threading`, `select`, `atexit`, `Anthropic`, `BadRequestError`.
+2. **L4:** `_attrs = termios.tcgetattr(sys.stdin)` — save current terminal attributes.
+3. **L5:** `atexit.register(...)` — guarantee terminal restoration on any exit path (clean exit, exception, Ctrl+C).
+4. **L6:** Create shared `interrupt = threading.Event()`.
+5. **L8:** Tuple-assign `client`, `MODEL`, `tools`. **No `CTX` constant** — model-agnostic.
+6. **L9:** Build the `system` prompt with `os.getcwd()` and `datetime.now()` snapshots.
+7. **L10:** Define `ESC_MSG` string constant.
+8. **L11:** Tuple-assign `chat` (True iff no CLI args), initial `messages` (cooked-mode `input("> ")` if no argv), and `drop = 0`.
+
+### Listener function (L13–15)
+
+```python
+def listen(stop):
+    while not stop.is_set():
+        if select.select([sys.stdin], [], [], 0.1)[0] and sys.stdin.read(1) == "\x1b":
+            interrupt.set(); return
+```
+
+Loops until told to stop; does a 0.1s `select` on stdin; reads 1 char when data is available; sets `interrupt` on ESC and exits.
 
 ### Each loop iteration
 
-A single `try` block at the top routes between two modes via the `drop` counter; a single `except` handles the overflow signal.
+**L17–18: Deferred interrupt handling**
+```python
+while True:
+    if interrupt.is_set(): messages.append({"role": "user", "content": ESC_MSG}); interrupt.clear()
+```
+If `interrupt` is set from a previous iteration (e.g., ESC during compaction), append the ESC user message and clear the flag *before* starting the next API call.
 
-**Recovery mode — `drop > 0` (L10–15):**
-- L11: Compute `turns` — the index of every user-text message in `messages`. Each is a safe slice boundary (no orphaned `tool_result` blocks).
-- L12: If `drop > len(turns)`, the last-user-text fallback already failed last iteration — `break` and exit cleanly.
-- L13: Slice. If `drop < len(turns)`: `messages[turns[drop]:]` (drop oldest `drop` turns). Else: `[messages[turns[-1]]]` (just the most recent user-text — always tiny, effectively guaranteed to fit).
-- L14: Compaction API call with the truncated slice. `next()` with a fallback string handles the edge case of a response missing a text block.
-- L15: Replace `messages` with `[{"role": "user", "content": "[resuming] <gist>"}]`, reset `drop = 0`, `continue` — next iteration is normal mode.
+**L19–20: Enter work mode**
+```python
+tty.setcbreak(sys.stdin); stop = threading.Event()
+t = threading.Thread(target=listen, args=(stop,), daemon=True); t.start()
+```
+Switch terminal to raw mode (line buffering and echo off), create a fresh per-iteration `stop` Event, spawn the daemon listener.
 
-**Normal mode — `drop == 0` (L16):**
-- L16: Main API call with `system + tools + messages`.
+**L21: `try:`** — the work-phase body is wrapped so `finally` (L68–69) can always restore state.
 
-**On `BadRequestError` (L17–19):**
-- L18: If the message doesn't contain `"prompt is too long"`, re-raise — we don't mask unrelated 400s (rate limits, malformed requests, etc.).
-- L19: Otherwise `drop += 1; continue` — next iteration handles recovery with one more turn dropped.
+**L22–28: Compaction branch (`drop > 0`)**
+- Compute `turns` (user-text indices).
+- If `drop > len(turns)`: the last-user-text fallback already failed last iter — `break`.
+- Slice: `messages[turns[drop]:]` if `drop < len(turns)`, else `[messages[turns[-1]]]` (just last user-text).
+- Make a **non-streaming** API call with the compaction directive — runs to completion uninterruptibly.
+- Extract the text from the response (`next()` with fallback string for safety).
+- Replace `messages = [{"role": "user", "content": f"[resuming] {s}"}]`, reset `drop = 0`, `continue`.
 
-**On success — process response (L20–30):**
-- L20: Append assistant response (`r.content` block list) to `messages`.
-- L21: Short-circuit print of every non-empty text block in the response.
-- L22: Collect `tool_use` blocks into `calls`.
-- L23 branch:
-  - **No calls + one-shot** (`chat == False`): L24 → `break`, exit.
-  - **No calls + chat**: L25 prompts `\n> `. `/q` exits silently; non-empty input becomes the next user message via L26.
-  - **Has calls**: L28–29 build `results` — for each: print `$ <cmd>`, run via `subprocess.getoutput`, wrap as a `tool_result` with matching `tool_use_id`. L30 appends one user message containing all results.
+**L29–33: Streaming main API call**
+```python
+with client.messages.stream(...) as stream:
+    for ev in stream:
+        if interrupt.is_set(): break
+        if ev.type == "content_block_delta" and hasattr(ev.delta, "text"):
+            sys.stdout.write(ev.delta.text); sys.stdout.flush()
+    snap = stream.current_message_snapshot
+```
+- Stream events from the API.
+- Check `interrupt` between every event.
+- Live-print text deltas as they arrive (token-by-token UX).
+- Capture the snapshot before the `with` exits (closes the connection, cancels the request server-side if we broke).
+
+**L34: `print()`** — newline to terminate the streamed text.
+
+**L35–40: Interrupt-during-stream handler**
+```python
+if interrupt.is_set():
+    if snap.content:
+        messages.append({"role": "assistant", "content": snap.content})
+        if tu := [b for b in snap.content if b.type == "tool_use"]:
+            messages.append({"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": b.id, "content": "[interrupted — not run]"}
+                for b in tu
+            ]})
+    messages.append({"role": "user", "content": ESC_MSG}); interrupt.clear(); continue
+```
+Two-step boundary closure: (1) append assistant snapshot + paired `tool_result` placeholders for any `tool_use` blocks; (2) append the ESC user message as a new turn boundary. Skip step 1 if no content arrived before interrupt.
+
+**L41: Normal-path append** — `messages.append({"role": "assistant", "content": snap.content})`.
+
+**L42: Gather `tool_use` blocks** — `calls = [b for b in snap.content if b.type == "tool_use"]`.
+
+**L43–48: No-calls branch (model returned text-only)**
+- Stop the listener thread, join with 0.2s timeout, restore cooked mode.
+- If one-shot: `break`.
+- Read next user input via `input("\n> ")` (cooked mode, line-buffered).
+- `/q` exits; non-empty input becomes the next user message; `continue`.
+
+**L49–62: Tool execution loop**
+```python
+results = []
+for i, c in enumerate(calls):
+    if interrupt.is_set():
+        # Fill placeholders for this tool and all remaining
+        results += [...]
+        break
+    print(f"$ {c.input['cmd']}")
+    proc = subprocess.Popen(c.input["cmd"], shell=True, stdout=PIPE, stderr=STDOUT, text=True)
+    killed = False
+    while proc.poll() is None:
+        if interrupt.is_set(): proc.kill(); killed = True; break
+        select.select([], [], [], 0.05)   # 50ms idle
+    out = proc.stdout.read() if proc.stdout else ""
+    results.append({"type": "tool_result", "tool_use_id": c.id, "content":
+                    (out + "\n[interrupted]") if killed else (out or "(no output)")})
+    if killed:
+        # Fill placeholders for remaining tools
+        results += [...]
+        break
+```
+Each tool gets:
+- A pre-execution interrupt check (so we can bail before even starting).
+- A `Popen` invocation (instead of `getoutput`) so we can poll for interrupt.
+- A 50ms-tick poll loop that kills the process on interrupt.
+- A post-exit drain of stdout (captures buffered bytes after kill).
+- A `tool_result` entry: real output for normal completion, `partial + "[interrupted]"` for killed, `[interrupted — not run]` for never-started.
+
+**L63: Append all results** as one user message — `tool_use`/`tool_result` pairing satisfied for every block.
+
+**L64: Post-tool ESC append**
+```python
+if interrupt.is_set(): messages.append({"role": "user", "content": ESC_MSG}); interrupt.clear()
+```
+If the loop exited because of interrupt, append the ESC user message and clear the flag.
+
+**L65–67: `BadRequestError` handler**
+```python
+except BadRequestError as e:
+    if "prompt is too long" not in str(e): raise
+    drop += 1
+```
+Only context-overflow errors trigger recovery; other 400s propagate. Drop counter advances; next iteration handles compaction.
+
+**L68–69: `finally:` cleanup**
+```python
+finally:
+    stop.set(); t.join(timeout=0.2); termios.tcsetattr(sys.stdin, termios.TCSADRAIN, _attrs)
+```
+Always stop the listener, join the thread (≤0.2s), restore cooked terminal mode. Idempotent — safe to call even if already done inline (e.g., in the no-calls branch).
+
+### Loop exits
+
+- **One-shot completion**: chat=False AND model returns no tool calls → `break`.
+- **`/q`**: user types `/q` at the `>` prompt → `break`.
+- **Exhausted compaction**: `drop > len(turns)` → `break` (pathological; practically unreachable since the last-user-text fallback essentially always fits).
+- **`Ctrl+C` / process kill**: `KeyboardInterrupt` propagates; `atexit` ensures cooked terminal mode is restored.
+
+### Restart
+
+A fresh `uv run quark.py …` is a clean Python process. New system prompt with fresh `cwd` and `now()`, empty `messages`, `drop = 0`, fresh `interrupt` Event. **Memory persists** — `.quark/memory/memory.md` survives every restart.
+
+## Context management
 
 ### Compaction state machine
 
-Walk-through assuming `messages` has `N` turns when overflow first hits:
+The `drop` counter advances on each context-overflow error and resets on the first successful compaction. Recovery is driven entirely by the outer `while True` — no inner loops, no nested try/except.
 
 | Iter | `drop` at start | Action | Outcome | `drop` at end |
 |---|---|---|---|---|
-| 1 | 0 | Main call | overflow | 1 |
-| 2 | 1 | Compact with oldest 1 turn dropped | likely success | 0 |
+| 1 | 0 | Main streaming call | overflow | 1 |
+| 2 | 1 | Compact (drop oldest 1 turn) | likely success | 0 |
 | 3 | 2 | (only if iter 2 also overflowed) | likely success | 0 |
 | … | … | … | … | … |
-| N+1 | N | Compact with just last user-text | guaranteed-fits | 0 |
-| N+2 | N+1 | `drop > len(turns)` → `break` | exit (pathological only) | — |
+| N+1 | N | Compact (just last user-text) | guaranteed-fits | 0 |
+| N+2 | N+1 | `drop > len(turns)` → `break` | exit (pathological) | — |
 
-`drop` increments by 1 on each failed call, resets to 0 on the first successful compaction. After success, `messages = [{"role": "user", "content": "[resuming] <gist>"}]` (one tiny message) and the next iteration runs normal mode.
+### Per-iteration message growth
 
-### Per-turn message growth
-- Normal turn: +2 messages (assistant + user-text or user-tool_results).
-- Compaction turn: history collapses to 1, then the next iteration appends normally.
-
-### Loop exits
-- **One-shot** (CLI args present): exits when the model returns a response with no tool calls.
-- **`/q`** (chat only): silent break.
-- **Exhausted fallback**: `drop > len(turns)` — pathological only; in practice unreachable.
-- **Ctrl+C / kill**: hard exit at any point.
-
-### Restart
-A fresh `uv run quark.py ...` is a clean Python process. New system prompt with fresh `cwd` and `now()`, empty `messages`, `drop` back to 0. **Memory persists** — `.quark/memory/memory.md` survives every restart and quark can read or extend it any time via bash.
+- **Normal turn**: +2 messages (assistant + user-text or user-tool_results).
+- **Interrupted turn**: closure adds 2–3 messages (assistant snapshot + paired tool_results + ESC user-text), all valid pairs.
+- **Compaction iter**: history collapses to 1 (`[resuming]` message); next iter appends normally.
 
 ## Memory mechanics
 
