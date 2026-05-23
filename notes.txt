@@ -182,11 +182,80 @@ Currently text-to-other-selves happens implicitly: the model generates text, it 
 - Con: Loses streaming
 - Con: Awkward for model
 
-**Recommendation:** Keep Option A (current) for now. The streaming UX is too valuable to lose. Option B could be revisited if we want:
-- Multiple recipients (different humans/agents on different channels)
-- Feedback loops (read receipts, user reactions)
-- Sound/voice output
-- Persistent message logs
+**DECISION (UPDATED): Option C is the correct choice.**
+
+User's insight: humans have ONE body — a singular act-affector. We use it to chop wood (act on world) AND to speak with another person (act on other selves). The body is unified. The DISTINCTION between acting on world vs acting on others lives in the SEMANTIC CONTENT of the act, not in the channel.
+
+By analogy:
+- bash IS quark's body — the singular tool through which it acts
+- `rm file.txt` — acting on world (semantically: modifying environment)
+- `echo "hello, chase"` — acting on other selves (semantically: communicating)
+- The model itself knows the intent of each command from the command's content
+
+This is cognitively deeper than splitting "saying" and "doing" by separate channels. It mirrors how humans actually work.
+
+### Implications for quark.py
+
+**System prompt changes (Phase 1 + Phase 3 combined):**
+
+```
+# Output (Act)
+**Body:** bash is your body — your singular means of acting.
+- act on world: file operations, programs, system commands
+- act on other selves: echo / printf to produce text they see
+- act on self: write to long-term memory file
+
+The distinction is in WHAT you do with your body, not WHICH body part you use.
+```
+
+The Output section no longer enumerates separate channels (text vs bash). Instead, it presents bash as the unified body, and the model semantically distinguishes intent (acting on world vs others vs self).
+
+**Streaming text behavior:**
+
+Currently the model emits text blocks that stream to terminal. Under Option C philosophy, this text becomes the model's "thinking aloud" — visible but understood as internal. Real communication with the user happens via `echo` etc.
+
+Two possible implementations:
+
+**Implementation C.1: Soft (system prompt only)**
+- Keep all current code
+- Just update system prompt to frame bash as the body
+- Model still streams text (which is fine — it's its internal monologue)
+- Model uses echo/printf when it wants the user to see specific intentional messages
+- Bash output is captured in tool_result; user sees `$ echo "..."` line and could see the output if we update the harness to print it
+
+**Implementation C.2: Strict (suppress text streaming)**
+- Update harness to not print text deltas to terminal (model's text is for its own thinking)
+- Print bash output to terminal during/after execution (this is the actual communication)
+- Clearer separation: thinking is invisible, acts are visible
+- Significant UX change
+
+**Implementation C.3: Hybrid**
+- Keep text streaming (it's useful for user to see model's reasoning)
+- Also print bash output (so user sees both reasoning and acts)
+- Both visible; user understands streaming text = thinking, bash output = explicit act
+
+**Recommendation: C.1 (soft).** Minimal code change. Just update the system prompt to teach the cognitive model that bash is the body. Trust the model to use it appropriately. The streaming text remains as the model's thinking-aloud channel; explicit acts go through bash.
+
+If we want to add C.3's bash-output-to-user later, that's a small additional change to the tool execution loop (print stdout after read).
+
+### Harness text changes under Option C
+
+The "saying" vs "doing" distinction in interrupt markers becomes less precise but still useful for describing WHEN in the act cycle the interrupt happened:
+
+| Marker | New framing |
+|---|---|
+| ESC_SAYING (interrupt during text stream) | The model was thinking out loud / about to act |
+| ESC_DOING (interrupt during bash execution) | An act through the body was in progress |
+
+These remain valid. Could also rename to ESC_THINK_INTERRUPTED and ESC_ACT_INTERRUPTED for full alignment with observe-think-act primitives. But channel-specific is fine.
+
+### Variable name implications
+
+Under Option C:
+- `saying` (var) — should be renamed to something more like `thinking` or kept as `saying` (text snapshot during stream)
+- `doing` (var) — fine, it's a subprocess running a body-act
+
+Probably keep current names. The cognitive frame in the prompt is what matters.
 
 ### Phase 4: Variable/Function Naming (low value, optional)
 
@@ -291,9 +360,10 @@ When this conversation is summarized via compaction, the next instance of me nee
 - Just completed a thorough walk through every harness-injected text, verifying alignment with cognitive frame
 - User pointed out the deeper framing: observe-think-act loop with three models, bidirectional causation
 - User asked me to persist this framing to notes.txt before context compaction
-- Pending: decide whether to apply Phase 1 system prompt restructure
+- **USER PICKED OPTION C** for the saying-as-tool question: bash is quark's "body" (singular act-affector). Cognitive distinction (act on world vs others vs self) lives in the semantic content of the bash command, not in separate channels. Human-body analogy: we have one body, use it for both wood-chopping and conversation, yet don't conflate them.
+- Pending: apply Phase 1 system prompt restructure (now with Option C body framing in Output section)
 - Pending: decide whether to rename perceive → observe
-- Pending: consider Phase 3 (saying as tool) at some future point
+- Pending: decide on implementation depth (C.1 soft = prompt only, C.2 strict = suppress text stream, C.3 hybrid = both visible)
 
 ---
 
