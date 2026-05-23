@@ -16,7 +16,8 @@ while True:
     if not calls:
         if not chat: break
         if (u := input("\n> ")) == "/q": break
-        messages.append({"role": "user", "content": u}); continue
+        if u.strip(): messages.append({"role": "user", "content": u})
+        continue
     results = []
     for c in calls: print(f"$ {c.input['cmd']}"); results.append({"type": "tool_result", "tool_use_id": c.id, "content": subprocess.getoutput(c.input["cmd"]) or "(no output)"})
     messages.append({"role": "user", "content": results})
