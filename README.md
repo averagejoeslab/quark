@@ -4,12 +4,12 @@ An agentic organism. 65 lines of Python. One bash tool. One loop. Streaming resp
 
 ## Two paths
 
-- 👤 **Just using quark?** Jump to [User guide](#user-guide).
-- 🔧 **Want to understand or contribute?** Start at [Engineering deep dive](#engineering-deep-dive).
+- 👤 **Just using quark?** Jump to [users](#-users).
+- 🔧 **Want to understand or contribute?** Start at [engineers](#-engineers).
 
 ---
 
-# User guide
+# 👤 users
 
 ## Installation
 
@@ -70,7 +70,7 @@ The file is gitignored by default so your memory stays local.
 
 ---
 
-# Engineering deep dive
+# 🔧 engineers
 
 ## Design philosophy
 
