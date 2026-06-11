@@ -27,6 +27,8 @@ uv pip install anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+quark reads the key from the `ANTHROPIC_API_KEY` environment variable — nothing else (no `.env` file loading). Export it in the shell you run quark from, or add the export to your `~/.zshrc`/`~/.bashrc` to persist it.
+
 ## A note on safety
 
 quark executes whatever bash the model produces — **immediately, with your user privileges, no confirmation step**. That is the whole design: bash is quark's body. Treat it accordingly: run it in a container or a directory you can afford to lose, don't point it at production credentials, and keep ESC handy.
