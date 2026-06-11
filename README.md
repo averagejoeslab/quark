@@ -505,7 +505,7 @@ One bash invocation per response (prefer focused actions to keep results small),
 - **Acts** — on self: long-term memory writes · on world: file ops, programs, system commands · on other selves: echo/printf
 - **Observes** — of self: long-term memory reads · of world: ls, cat, ps, env, date, pwd, etc.
 
-It closes with a grounding gradient: derive the goal behind the input first, then resolve from the nearest source outward — mind (already in context) → memory → world → asking other selves — pivoting only when one comes up empty. This encodes the policy quark itself derived after being caught `finger`-ing the system for a name its own memory already knew.
+It closes with a grounding gradient: derive what the observation really means first (the intent behind a message, the signal within a result — observations aren't always words), then resolve from the nearest source outward — mind (already in context) → memory → world → asking other selves — pivoting only when one comes up empty. This encodes the policy quark itself derived after being caught `finger`-ing the system for a name its own memory already knew.
 
 ### Mechanics
 

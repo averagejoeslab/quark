@@ -520,3 +520,5 @@ Applied (Chase's refinement of quark's derived pattern):
 Fourth organism-derived insight promoted this session (read-primitives, memory-first ordering came from quark; mind-first grounding + intent derivation refined by Chase).
 
 Live test for next session: "what's my name?" should resolve via one grep, not a finger chain; a correction from Chase should produce a visible memory write before the turn ends.
+
+Addendum: grounding gradient generalized same day — "the goal behind the words" → "the intent behind a message, the signal within a result." Inputs aren't always words (interrupts, command results, exit codes, file contents); "observation" is the loop-primitive term, and the two examples span both observation sources (other selves, world).
