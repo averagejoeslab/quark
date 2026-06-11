@@ -482,7 +482,7 @@ The system prompt is structured as three cognitive models plus body operations a
 | **Mind** | "your context window — where thinking happens. Summarized when full." |
 | **Body** | "bash — your singular means of acting and observing. Its reach is the whole system: anything doable from a command line — any program, any language, any tool you install — is within it." |
 | **Loop** | "observe → think → act → repeat." |
-| **Long-term memory** | `.quark/memory/memory.md` — "your memory extended into the world for persistence across sessions." Includes init, format contract, heredoc write recipe, and read strategies (`tail`, `grep` by subject/date/context). |
+| **Long-term memory** | `.quark/memory/memory.md` — "your memory extended into the world for persistence across sessions." Includes init, format contract, the printf+heredoc write recipe, and reads framed as stream primitives (slice by time, filter by content, expand context). |
 
 Bash is the **one body** — the singular act-affector. The distinction between acting on the world (`rm file.txt`), acting on other selves (`echo "hello"`), and acting on the self (memory writes) lives in the *semantic content* of the act, not in separate channels — the same way a human uses one body to chop wood and to speak.
 
@@ -556,8 +556,8 @@ The final section embeds quark.py's source code (via `mechanics()`). The `def sy
 
 - **Initialize** (if missing): `mkdir -p .quark/memory && [ ! -f ... ] && echo "# Quark Memory" > ...`
 - **Format** (contract): `## YYYY-MM-DD HH:MM:SS` header followed by `-` bullets per observation.
-- **Write**: heredoc append (portable across shells; avoids the `echo -e` portability bug).
-- **Read strategies**: `tail` for recent, `grep "## 2026-05"` by date, `grep -A 10` for entries with bullets, `head`/`wc`/`sed` for novel queries.
+- **Write**: split recipe — `printf '\n## %s\n' "$(date ...)"` appends the header (command substitution expands), then a **quoted** heredoc (`<< 'EOF'`) appends the bullets (content stays literal). The split exists because a single unquoted heredoc forces a choice between timestamp expansion and content safety — live sessions showed the model reliably choosing the quoted form and improvising headers, drifting from the format contract.
+- **Read strategies**: framed as three composable primitives over a timestamped stream — slice by time (`tail`, `grep "## 2026-05"`), filter by content (`grep "topic"`), expand context (`grep -A 10`). This abstraction was derived by quark itself in a live session and promoted into the prompt.
 
 The format is a contract quark maintains so future-quark can grep reliably across sessions.
 

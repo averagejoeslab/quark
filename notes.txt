@@ -484,3 +484,15 @@ DECISION: fix at the identity level, not via a capability manual or a second too
 Rejected: enumerating capabilities (already in weights, goes stale), a separate python tool (forks the body), relying on quark's own memory entry (probabilistic recall; the frame belongs in-context every turn).
 
 Also: system_prompt.txt removed — a quark-written transcription of its own prompt, corrupted by shell quoting in 4 places (lost "## " in the memory recipe, mind'''s artifact, swallowed ESC constants in Mechanics, no trailing newline). quark was observed grepping it as self-reference instead of its real in-context prompt. Lesson: quark reasons from self-descriptions it finds in the world; don't leave drifted ones lying around.
+
+---
+
+## MEMORY MECHANICS REVISION (2026-06-10, from live memory-exploration session)
+
+Two findings from a session where Chase probed quark's memory understanding:
+
+1. **Read framing promoted from quark's own derivation.** Pushed to generalize, quark reduced all read strategies to three primitives over a timestamped stream: slice by time, filter by content, expand context around matches. This replaced the vague "Inspect memory for novel read strategies..." line (which quark had to guess the meaning of). First instance of the loop closing: organism derives insight about itself → writes it to memory → harness adopts it into the prompt.
+
+2. **Write recipe split to fix observed format drift.** Two sessions of evidence: the contract header "## YYYY-MM-DD HH:MM:SS" erodes ("## 2026-06-10 (session start)") because the old recipe's unquoted heredoc forced a choice between $(date) expansion and content safety — the model reliably chose safety (<< 'EOF') and improvised headers. New recipe makes the safe path the correct path: printf appends the expanded timestamp header, quoted heredoc appends literal bullets. Verified: recipe executed from the rendered prompt produces exact-contract headers with $/backtick/$() content untouched. Mechanical fix > louder exhortation.
+
+Existing malformed headers in memory.md left as history (date-greps still match them). Note: memory.md was found re-initialized before this session (prior entries gone) — init command can't overwrite ([ ! -f ] guard), presumed deliberate user cleanup, unconfirmed.
