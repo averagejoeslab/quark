@@ -496,3 +496,13 @@ Two findings from a session where Chase probed quark's memory understanding:
 2. **Write recipe split to fix observed format drift.** Two sessions of evidence: the contract header "## YYYY-MM-DD HH:MM:SS" erodes ("## 2026-06-10 (session start)") because the old recipe's unquoted heredoc forced a choice between $(date) expansion and content safety — the model reliably chose safety (<< 'EOF') and improvised headers. New recipe makes the safe path the correct path: printf appends the expanded timestamp header, quoted heredoc appends literal bullets. Verified: recipe executed from the rendered prompt produces exact-contract headers with $/backtick/$() content untouched. Mechanical fix > louder exhortation.
 
 Existing malformed headers in memory.md left as history (date-greps still match them). Note: memory.md was found re-initialized before this session (prior entries gone) — init command can't overwrite ([ ! -f ] guard), presumed deliberate user cleanup, unconfirmed.
+
+---
+
+## MEMORY READS v2 + ENCODE-SIDE LINE (2026-06-10)
+
+Read framing revised again after critique of the three-primitive version:
+- Closed "three primitives" claim dropped — it was slightly false (counting/aggregating/joining fit no primitive) and quark was observed discarding needs that fell outside the taxonomy.
+- Named-strategy list dropped — menus invite selection/enumeration over derivation (quark literally asked "are there other strategies?").
+- New grounding: reads are QUESTIONS answered by composing any text tools over the FORMAT CONTRACT ("what makes it queryable") — generalization comes from knowing why reads work, not from a strategy list. Examples demoted to "common moves" with explicit "moves, not a menu" closer. Added the one contract-specific trick worth its tokens: grep "^## " = index of every entry.
+- ENCODE-SIDE (the bigger lever): format line now reads "- one observation per bullet, phrased with the words future-you will grep for". Retrieval is encode-limited — no read strategy can find an entry like "discussed the thing from earlier". Findability is decided at write time.
