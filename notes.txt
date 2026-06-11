@@ -468,3 +468,19 @@ A review found 9 bugs/issues; all fixed. quark.py: 71 → 81 lines. README fully
 - observe() via real pty in cbreak: lone ESC interrupts; `ESC[A` ignored; typing ignored; arrow-then-ESC interrupts. ALL PASS.
 - Smoke (dummy key, pty): one-shot and chat both build system() and reach the API (expected 401); blank first input re-prompts.
 - NOT yet verified live (needs real key): cache hit telemetry, ESC acknowledgment phrasing, compaction end-to-end.
+
+---
+
+## BODY-REACH FRAMING (2026-06-10, follow-up to hardening pass)
+
+Live sessions showed quark anchoring on coreutils — treating python -c / installing tools as exotic workarounds rather than normal body movement (even though its weights know better; it enumerated those capabilities unprompted when asked).
+
+DECISION: fix at the identity level, not via a capability manual or a second tool.
+
+1. Self Model Body line extended: "Its reach is the whole system: anything doable from a command line — any program, any language, any tool you install — is within it." (Deepens the human-body analogy: a body's reach is everything the hands can grasp; python -c is picking up a hammer — still the one body.)
+2. Body Operations gains an escalation gradient: compose pipes → inline interpreters → write/run scripts → install tools, "prefer the lightest act that does the job" (licenses escalation without inviting reflexive package-installs).
+3. Tool description: "Run shell command — the whole system is in reach" (minimal echo at the decision moment; strategy lives only in the system prompt).
+
+Rejected: enumerating capabilities (already in weights, goes stale), a separate python tool (forks the body), relying on quark's own memory entry (probabilistic recall; the frame belongs in-context every turn).
+
+Also: system_prompt.txt removed — a quark-written transcription of its own prompt, corrupted by shell quoting in 4 places (lost "## " in the memory recipe, mind'''s artifact, swallowed ESC constants in Mechanics, no trailing newline). quark was observed grepping it as self-reference instead of its real in-context prompt. Lesson: quark reasons from self-descriptions it finds in the world; don't leave drifted ones lying around.

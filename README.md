@@ -480,7 +480,7 @@ The system prompt is structured as three cognitive models plus body operations a
 |---|---|
 | **Identity** | "You are quark — a self in a world with other selves." |
 | **Mind** | "your context window — where thinking happens. Summarized when full." |
-| **Body** | "bash — your singular means of acting and observing." |
+| **Body** | "bash — your singular means of acting and observing. Its reach is the whole system: anything doable from a command line — any program, any language, any tool you install — is within it." |
 | **Loop** | "observe → think → act → repeat." |
 | **Long-term memory** | `.quark/memory/memory.md` — "your memory extended into the world for persistence across sessions." Includes init, format contract, heredoc write recipe, and read strategies (`tail`, `grep` by subject/date/context). |
 
@@ -500,7 +500,7 @@ Bash is the **one body** — the singular act-affector. The distinction between 
 
 ### Body Operations
 
-One bash invocation per response (prefer focused actions to keep results small). Enumerated by target:
+One bash invocation per response (prefer focused actions to keep results small), with an escalation gradient for when utils fall short: compose pipes → inline interpreters (`python -c`) → write and run scripts → install tools — preferring the lightest act that does the job. Enumerated by target:
 
 - **Acts** — on self: long-term memory writes · on world: file ops, programs, system commands · on other selves: echo/printf
 - **Observes** — of self: long-term memory reads · of world: ls, cat, ps, env, date, pwd, etc.
