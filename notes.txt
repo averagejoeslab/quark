@@ -408,12 +408,7 @@ This is the canonical framing. Mind + Body = Self Model. Three first-class model
 
 ### What still needs alignment
 
-- README is now out of date — needs to reflect:
-  - New three-model structure (Self/World/Other Selves)
-  - Mind + Body framing
-  - Body Operations section
-  - The fact that bash output now reaches user
-  - 71 line count
+- ~~README is now out of date~~ — RESOLVED 2026-06-10: README fully realigned (three-model structure, Mind+Body framing, Body Operations, bash output to user, line numbers). See HARDENING PASS section below.
 
 ### Pending decisions (none urgent)
 
@@ -442,3 +437,34 @@ The user values:
 - The "self in a world with other selves" framing — quark is treated as an organism, not a chatbot
 
 When in doubt, ask. Don't apply structural changes without confirmation.
+
+---
+
+## HARDENING PASS (2026-06-10)
+
+A review found 9 bugs/issues; all fixed. quark.py: 71 → 81 lines. README fully realigned afterward (observe/body renames, new prompt structure, all line numbers re-checked against the 81-line file, safety note added).
+
+### Code fixes
+
+1. **Pipe deadlock (>64KB output)** — the poll loop now drains the pipe as output arrives (`select` on `doing.stdout` + `os.read`); output accumulates in `chunks` (bytes), decoded once with `errors="replace"`.
+2. **Kill reaches grandchildren** — `start_new_session=True` puts each command in its own process group; ESC does `os.killpg(doing.pid, 9)` (guarded by `except OSError` for the just-exited race). Pipelines and children die with the shell. Final drain is *bounded* (give up after 0.1s silence) so a backgrounded daemon holding the pipe can't wedge the loop.
+3. **Compaction retry** — `except:` → `except Exception:` with 1s backoff (select-as-sleep idiom). Ctrl+C now exits during a stuck compaction.
+4. **Empty content** — initial and chat prompts re-prompt until non-blank (never an empty message, never a phantom model re-invoke on blank Enter). Interrupt closure filters empty text blocks from the snapshot (`spoken := [...]`) before appending.
+5. **Stale interrupt flag** — `interrupt.clear()` added to the no-calls branch (after thread join, so it can't be re-set).
+6. **Arrow keys ≠ ESC** — observe() reads raw bytes via `os.read` (the text layer's readahead would hide the sequence tail) and select-peeks 20ms after `\x1b`: trailing byte → escape sequence, drained and ignored; silence → real ESC.
+7. **max_tokens guard** — if `stop_reason == "max_tokens"`, the last tool_use is never executed (lenient JSON parsing can yield a *truncated but parseable* cmd — dangerous). Paired with new placeholder: "[your doing was cut off before it was fully formed — it never reached the world]". Same guard covers tool_use with no `cmd`.
+8. **Prompt caching** — system() now returns `[{type: text, text: ..., cache_control: {type: ephemeral}}]`. DECISION: World Model "When" coarsened to date-only (`datetime.date.today()`) so the block is byte-stable within a session; prompt tells the model to observe exact time via body (`date`). The ~1500-token Mechanics embed is now cached after the first call.
+9. **README** — realigned last, after code settled (it hard-codes line numbers).
+
+### Open questions resolved/updated
+
+- Q7 (bash output to user): already resolved earlier (printed after completion); README now documents it.
+- Pending rename perceive→observe: done in d37b588, notes table above is historical.
+- New cognitive-frame term: `spoken` (filtered snapshot on interrupt) joins saying/doing.
+
+### Verification (no API key on this machine — mechanics tested in isolation)
+
+- Subprocess block (logic verbatim): 1MB output no-deadlock; stderr merge; exit codes; `sleep 5 & echo bg` returns in 0.16s; ESC kill of plain + pipeline < 0.5s with zero surviving processes; EOF-while-alive no busy-spin; invalid UTF-8 tolerated. ALL PASS.
+- observe() via real pty in cbreak: lone ESC interrupts; `ESC[A` ignored; typing ignored; arrow-then-ESC interrupts. ALL PASS.
+- Smoke (dummy key, pty): one-shot and chat both build system() and reach the API (expected 401); blank first input re-prompts.
+- NOT yet verified live (needs real key): cache hit telemetry, ESC acknowledgment phrasing, compaction end-to-end.
