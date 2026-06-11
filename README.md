@@ -505,6 +505,8 @@ One bash invocation per response (prefer focused actions to keep results small),
 - **Acts** — on self: long-term memory writes · on world: file ops, programs, system commands · on other selves: echo/printf
 - **Observes** — of self: long-term memory reads · of world: ls, cat, ps, env, date, pwd, etc.
 
+It closes with a grounding gradient: derive the goal behind the input first, then resolve from the nearest source outward — mind (already in context) → memory → world → asking other selves — pivoting only when one comes up empty. This encodes the policy quark itself derived after being caught `finger`-ing the system for a name its own memory already knew.
+
 ### Mechanics
 
 The final section embeds quark.py's source code (via `mechanics()`). The `def system():` line is replaced with `def system(): return "<system prompt redacted so you can see your self mechanics in harness>"` to avoid recursion. The model sees every other line verbatim — the observe function, the main loop, the interrupt handlers, the compaction retry loop, the tool execution.
@@ -556,6 +558,7 @@ The final section embeds quark.py's source code (via `mechanics()`). The `def sy
 
 - **Initialize** (if missing): `mkdir -p .quark/memory && [ ! -f ... ] && echo "# Quark Memory" > ...`
 - **Format** (contract): `## YYYY-MM-DD HH:MM:SS` header followed by `-` bullets per observation, phrased with the words future-quark will grep for — retrieval is encode-limited, so findability is decided at write time.
+- **What to write** (discretionary): what other selves teach quark — identities, preferences, corrections to how it operates. The prompt's framing: "a lesson not written is lost when the session ends." Persistence stays the model's call; this is guidance on value, not a mandate.
 - **Write**: split recipe — `printf '\n## %s\n' "$(date ...)"` appends the header (command substitution expands), then a **quoted** heredoc (`<< 'EOF'`) appends the bullets (content stays literal). The split exists because a single unquoted heredoc forces a choice between timestamp expansion and content safety — live sessions showed the model reliably choosing the quoted form and improvising headers, drifting from the format contract.
 - **Reads**: framed as questions answered by composing any text tools over the format contract, with illustrative moves — slice by time (`tail`, `grep "## 2026-05"`), filter by content (`grep -i "topic"`), expand around matches (`grep -B 2 -A 10`), index every entry (`grep "^## "`) — and an explicit "moves, not a menu" closer. Evolved from quark's own three-primitive derivation in a live session; the closed taxonomy was then dropped because it capped composition (counting, aggregating, and joining fit no primitive, and a menu invites selection over derivation).
 

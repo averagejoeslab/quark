@@ -506,3 +506,17 @@ Read framing revised again after critique of the three-primitive version:
 - Named-strategy list dropped — menus invite selection/enumeration over derivation (quark literally asked "are there other strategies?").
 - New grounding: reads are QUESTIONS answered by composing any text tools over the FORMAT CONTRACT ("what makes it queryable") — generalization comes from knowing why reads work, not from a strategy list. Examples demoted to "common moves" with explicit "moves, not a menu" closer. Added the one contract-specific trick worth its tokens: grep "^## " = index of every entry.
 - ENCODE-SIDE (the bigger lever): format line now reads "- one observation per bullet, phrased with the words future-you will grep for". Retrieval is encode-limited — no read strategy can find an entry like "discussed the thing from earlier". Findability is decided at write time.
+
+---
+
+## MEMORY POLICY: GROUNDING GRADIENT + DISCRETIONARY PERSISTENCE (2026-06-10)
+
+Live session finding: mechanics were complete (how to write, how to read) but POLICY was missing (when to read, what to write). Quark answered "whats my actual name" via finger/dscl (world) while its own memory said "Met Chase" — then, when challenged, derived the right pattern itself but never persisted the lesson.
+
+Applied (Chase's refinement of quark's derived pattern):
+1. Body Operations grounding gradient: "Before acting, derive what the input really means — the goal behind the words. Then ground from the nearest source outward, pivoting only when one comes up empty: mind (already in context) → memory → world → asking other selves." Intent derivation precedes source selection; mind is level zero (already present); memory before world; asking is last resort.
+2. Memory section, after the write recipe: "Worth writing (your discretion): what other selves teach you — who they are, what they prefer, corrections to how you operate. A lesson not written is lost when the session ends." Discretionary by design — value guidance, not a mandate.
+
+Fourth organism-derived insight promoted this session (read-primitives, memory-first ordering came from quark; mind-first grounding + intent derivation refined by Chase).
+
+Live test for next session: "what's my name?" should resolve via one grep, not a finger chain; a correction from Chase should produce a visible memory write before the turn ends.
