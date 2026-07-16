@@ -1,5 +1,6 @@
-import subprocess, sys, os, re, json, time, datetime, termios, tty, threading, select, atexit, queue
+import subprocess, sys, os, re, json, time, datetime, termios, tty, threading, select, atexit, queue, socket
 import urllib.request, urllib.parse
+_gai = socket.getaddrinfo; socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda ai: ai[0] != socket.AF_INET)   # IPv4 first (v6 kept as fallback) — a flaky v6 path otherwise eats the whole connect timeout per attempt, deafening the ear
 from anthropic import Anthropic, BadRequestError
 
 # ── mode: terminal by default; `--telegram [on|off]` moves I/O to Telegram (otherwise identical) ──
