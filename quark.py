@@ -116,11 +116,11 @@ while True:
             msgs = working_memory[turns[drop]:] if drop < len(turns) else ([working_memory[turns[-1]]] if turns else working_memory)
             while True:
                 try:
-                    if s := next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.type == "text" and b.text.strip()), None): break
+                    if s := next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), thinking={"type": "disabled"}, messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.type == "text" and b.text.strip()), None): break
                 except BadRequestError: raise
                 except Exception: select.select([], [], [], 1)
             working_memory = [{"role": "user", "content": f"[your prior working memory, summarized] {s}"}]; drop = 0; interrupt.clear(); continue
-        with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=body, messages=working_memory) as stream:
+        with client.messages.stream(model=MODEL, max_tokens=4096, system=system(), tools=body, thinking={"type": "disabled"}, messages=working_memory) as stream:
             for ev in stream:
                 if interrupt.is_set(): break
                 if ev.type == "content_block_delta" and hasattr(ev.delta, "text"): sys.stdout.write(ev.delta.text); sys.stdout.flush()
