@@ -115,7 +115,7 @@ while True:
             msgs = working_memory[turns[drop]:] if drop < len(turns) else ([working_memory[turns[-1]]] if turns else working_memory)
             while True:
                 try:
-                    if s := next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.text.strip()), None): break
+                    if s := next((b.text for b in client.messages.create(model=MODEL, max_tokens=2048, system=system(), messages=msgs + [{"role": "user", "content": "Your working memory is full. Summarize into a gist that preserves what matters for continuing."}]).content if b.type == "text" and b.text.strip()), None): break
                 except BadRequestError: raise
                 except Exception: select.select([], [], [], 1)
             working_memory = [{"role": "user", "content": f"[your prior working memory, summarized] {s}"}]; drop = 0; interrupt.clear(); continue
